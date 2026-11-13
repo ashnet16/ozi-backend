@@ -1,0 +1,7 @@
+kafka-python==2.0.2
+emoji==2.14.1
+qdrant-client==1.4.0
+sentence-transformers==2.3.1
+torch==2.1.2
+numpy==1.26.4
+orjson==3.9.15

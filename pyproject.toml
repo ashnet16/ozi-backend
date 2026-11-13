@@ -1,0 +1,46 @@
+[tool.poetry]
+name = "farcaster-grpc-client"
+version = "0.1.0"
+description = "Poller for Farcaster Hubble node using gRPC"
+authors = ["Ashley Mitchell"]
+package-mode = false
+
+[tool.poetry.dependencies]
+python = ">=3.10,<3.14"
+grpcio = ">=1.60.0"
+grpcio-tools = ">=1.60.0"
+protobuf = ">=4.25.1"
+kafka-python = ">=2.0.2"
+httpx = ">=0.26.0"
+
+[tool.poetry.group.dev.dependencies]
+black = "*"
+isort = "*"
+flake8 = "*"
+mypy = "*"
+pytest = "*"
+pre-commit = "*"
+
+[tool.poetry.scripts]
+grpc-poll = "producers.pollers:FarcasterGRPCPoller.run"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+# Formatting + Linting Configs
+[tool.black]
+line-length = 88
+target-version = ['py311']
+
+[tool.isort]
+profile = "black"
+
+[tool.flake8]
+max-line-length = 9999
+extend-ignore = ["E203", "W503", "E501"]
+exclude = ["proto/"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true

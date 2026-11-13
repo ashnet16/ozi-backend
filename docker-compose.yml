@@ -1,0 +1,158 @@
+version: "3.9"
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    networks:
+      - ozi-net
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    container_name: kafka
+    ports:
+      - "9092:9092"
+      - "29092:29092"
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,DOCKER:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,DOCKER://kafka:29092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,DOCKER://0.0.0.0:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    networks:
+      - ozi-net
+
+  postgres:
+    image: postgres:15
+    container_name: ozi-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: ozi
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+    networks:
+      - ozi-net
+
+  qdrant:
+    image: qdrant/qdrant
+    container_name: qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    environment:
+      - QDRANT__SERVICE__HOST=0.0.0.0
+    networks:
+      - ozi-net
+
+  consumer:
+    build:
+      context: .
+      dockerfile: analytics/Dockerfile
+    container_name: analytics-consumer
+    restart: always
+    environment:
+      - KAFKA_BOOTSTRAP_SERVER=kafka:29092
+      - POSTGRES_HOST=postgres
+      - POSTGRES_DB=ozi
+      - POSTGRES_USER=${POSTGRES_USER:?set POSTGRES_USER in .env}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    depends_on:
+      - kafka
+      - postgres
+    volumes:
+      - ./analytics:/app
+      - ./consumers:/app/consumers
+    command: python consumer.py
+    networks:
+      - ozi-net
+
+  poller:
+    build:
+      context: .
+      dockerfile: producers/Dockerfile
+    container_name: ozi-poller
+    volumes:
+      - ./producers:/app/producers
+      - ./proto:/app/proto
+    depends_on:
+      - kafka
+    environment:
+      - KAFKA_BOOTSTRAP_SERVER=kafka:29092
+    command: python -m poller
+    networks:
+      - ozi-net
+
+  semantic-consumer:
+    build:
+      context: .
+      dockerfile: consumers/Dockerfile
+    container_name: ozi-semantic-consumer
+    volumes:
+      - ./consumers:/app/consumers
+    depends_on:
+      - kafka
+      - qdrant
+    environment:
+      - VECTOR_DB_HOST=qdrant
+      - VECTOR_DB_PORT=6333
+    command: python -m consumer
+    networks:
+      - ozi-net
+
+  redis:
+    image: redis:7
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: always
+    networks:
+      - ozi-net
+
+  ozi-api:
+    build:
+      context: .
+      dockerfile: rag/Dockerfile
+      args:
+        PIP_RETRIES: 10
+        PIP_TIMEOUT: 60
+    container_name: ozi-api
+    ports:
+      - "8000:8000"
+    environment:
+      - VECTOR_DB_HOST=qdrant
+      - VECTOR_DB_PORT=6333
+      - OPENAI_API_KEY=${OPENAI_API_KEY:?set OPENAI_API_KEY in .env}
+      - POSTGRES_HOST=postgres
+      - POSTGRES_DB=ozi
+      - POSTGRES_USER=${POSTGRES_USER:?set POSTGRES_USER in .env}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - qdrant
+      - postgres
+    volumes:
+      - ./rag:/app/rag
+    networks:
+      - ozi-net
+
+volumes:
+  qdrant_storage:
+  postgres_data:
+  redis_data:
+
+networks:
+  ozi-net:

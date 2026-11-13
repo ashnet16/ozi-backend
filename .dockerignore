@@ -1,0 +1,28 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Git repo
+.git/
+.gitignore
+
+# macOS junk
+.DS_Store
+
+# Editor junk
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test cache
+.pytest_cache/
+coverage/
+
+# Env files
+.env
+.env.*
+
+# Docker files
+docker-compose.override.yml

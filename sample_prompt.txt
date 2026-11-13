@@ -1,0 +1,20 @@
+"""
+    You are a classifier that decides if a query should be answered with a SQL database query or a semantic search.
+    Return exactly one word: 'sql' or 'semantic'.
+
+    Examples:
+    Query: List all users who posted about Trump last month
+    Answer: sql
+
+    Query: What are people saying about inflation?
+    Answer: semantic
+
+    Query: Show posts about AI with the most reactions
+    Answer: sql
+
+    Query: Who's been casting about Gaza lately?
+    Answer: semantic
+
+    Query: {}
+    Answer:
+    """
