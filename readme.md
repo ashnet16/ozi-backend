@@ -34,25 +34,28 @@ Ozi's data ingestion and analytics pipeline is designed to prioritize:
 
 ### 1. High Availability (HA)
 
-- The Kafka analytics consumer is built to **restart automatically** after crashes or restarts.
-- Messages are consumed **continuously** and **buffers are flushed** to Postgres on normal exit or crash recovery.
-- If the consumer goes down temporarily, it will **reconnect and resume** from the latest Kafka offset without loss.
+- The poller, both consumers and the API **restart automatically** (Docker restart policies) after a crash.
+- The poller **reconnects** to the Snapchain node every 3 seconds when the stream drops.
+- The analytics consumer **reconnects** to Postgres when the connection is lost.
+- After a restart, each consumer **resumes** from its last committed Kafka offset.
 
 ---
 
 ### 2. Reliability
 
-- **At least once processing**: Kafka guarantees messages are delivered at least once to the consumer.
-- **Bulk insertion**: Records are inserted in efficient batches for speed and to minimize memory usage.
+- **Live events only**: the poller subscribes from "now". Events emitted while it is down are not backfilled.
+- **Bulk insertion**: Records are buffered in memory and inserted in batches of 100 (per event type for Postgres, per 100 casts for Qdrant).
+- **Possible loss on stop or crash**: Kafka offsets are auto-committed while events are still in the in-memory buffer, and buffers are not flushed on shutdown, so up to one batch can be lost when a consumer stops. Delivery is therefore not strictly at-least-once.
+- **Idempotent inserts**: Postgres rows are keyed by event id with `ON CONFLICT DO NOTHING`, so replayed events do not create duplicates.
 
 ---
 
 ### 3. Eventual Consistency
 
 - Ozi is designed to be **eventually consistent**:  
-  All valid Farcaster events (casts, comments, reactions) will eventually appear in Postgres.
-- **Small ingestion delays are acceptable** in favor of higher throughput and system resilience.
-- Queries reflect **near-real-time data** under normal operation.
+  Farcaster events (casts, comments, reactions) appear in Postgres once their batch fills, barring the loss case above.
+- **Small ingestion delays are acceptable** in favor of higher throughput. On a quiet stream, recent events are not queryable until a batch of 100 fills.
+- Other event types are published to Kafka but ignored by the consumers; unhandled ones go to `farcaster.events.dlq`, which nothing reads yet.
 
 ---
 
@@ -60,11 +63,11 @@ Ozi's data ingestion and analytics pipeline is designed to prioritize:
 
 | Principle | How Ozi Achieves It |
 |:---|:---|
-| High Availability | Consumer automatically reconnects to Kafka after crashes. |
-| Eventual Consistency | Message arrival order is not strictly enforced; data is ingested reliably over time. |
+| High Availability | Services restart automatically; the poller and analytics consumer reconnect to their upstreams. |
+| Eventual Consistency | Message arrival order is not strictly enforced; ingestion lags by up to one batch. |
 | Efficient Batching | Messages are buffered by type and bulk inserted. |
-| Graceful Degradation | If traffic spikes, consumers process with slight delay without dropping data. |
-| Minimal Operator Overhead | Self-healing consumer design with automatic reconnection and flush logic. |
+| Graceful Degradation | If traffic spikes, consumers fall behind and catch up from Kafka rather than dropping messages. |
+| Minimal Operator Overhead | Restart policies and automatic reconnection; no manual recovery steps. |
 
 ---
 
@@ -173,8 +176,8 @@ Requirements: Docker (with Compose), `make` and `git`. No host Python is needed.
 #### 1. Clone
 
 ```bash
-git clone https://github.com/ashnet16/ozi.git
-cd ozi
+git clone https://github.com/ashnet16/ozi-backend.git
+cd ozi-backend
 ```
 
 #### 2. Configure
