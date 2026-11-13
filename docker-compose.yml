@@ -89,6 +89,9 @@ services:
     environment:
       - KAFKA_BOOTSTRAP_SERVER=kafka:29092
       - SNAPCHAIN_ENDPOINT=${SNAPCHAIN_ENDPOINT:-host.docker.internal:3383}
+      - SNAPCHAIN_USE_TLS=${SNAPCHAIN_USE_TLS:-false}
+      - SNAPCHAIN_API_KEY=${SNAPCHAIN_API_KEY:-}
+      - SNAPCHAIN_API_KEY_HEADER=${SNAPCHAIN_API_KEY_HEADER:-x-api-key}
     command: python -m poller
     networks:
       - ozi-net

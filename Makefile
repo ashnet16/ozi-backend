@@ -54,3 +54,16 @@ start:
 	@docker compose up -d
 
 setup: build start
+
+# Local Snapchain devnet (4 nodes, built from the Snapchain clone). Node 1 serves
+# gRPC on localhost:3383 and HTTP on localhost:3381, where the poller looks by default.
+.PHONY: snapchain-up snapchain-down snapchain-logs
+
+snapchain-up: clone-snapchain
+	@docker compose -f snapchain/docker-compose.yml up -d --build
+
+snapchain-down:
+	@docker compose -f snapchain/docker-compose.yml down
+
+snapchain-logs:
+	@docker compose -f snapchain/docker-compose.yml logs -f node1

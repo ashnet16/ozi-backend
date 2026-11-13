@@ -191,7 +191,42 @@ Fill in `POSTGRES_USER`, `POSTGRES_PASSWORD` and `OPENAI_API_KEY`. Optionally se
 - `POSTGRES_HOST_PORT`, `REDIS_HOST_PORT`, `API_HOST_PORT` if 5432 / 6379 / 8000 are already in use
 - `SNAPCHAIN_ENDPOINT` — gRPC address of the Snapchain node the poller subscribes to (default `host.docker.internal:3383`, i.e. a node running on your machine)
 
-#### 3. Build and run
+#### 3. Choose a Snapchain node
+
+The poller needs a Snapchain node to read events from. There are two options.
+
+**Local test network (included).** The project can run Snapchain's own 4-node devnet on your machine. It is a private network with no real Farcaster data: the only casts on it are the ones you submit, which makes it suitable for testing the pipeline end to end.
+
+```bash
+make snapchain-up     # first run compiles Snapchain from source and is slow
+make snapchain-logs   # follow node 1
+make snapchain-down   # stop it
+```
+
+Node 1 serves gRPC on `localhost:3383` and HTTP on `localhost:3381`. The poller's default endpoint already points at it, so no configuration is needed. Check it with `curl http://localhost:3381/v1/info`.
+
+Startup notes:
+
+- **Give Docker enough memory first.** With 8 GB allotted to Docker the build ran out of memory and Docker killed running containers. With 24 GB it built cleanly alongside the Ozi stack. On Docker Desktop this is Settings > Resources > Memory.
+- **The first run takes about 35 minutes.** Measured on a 14-core Apple-silicon Mac: about 29 minutes compiling Snapchain's Rust dependencies and 6 minutes compiling Snapchain itself. There is no prebuilt devnet image; the published `farcasterxyz/snapchain` image has no devnet configuration.
+- **Later runs take seconds.** The image is cached (about 385 MB), and the nodes answer on `/v1/info` within about 20 seconds of starting.
+- **Ports used:** 3381 and 3383 to 3386 (TCP), 50051 to 50054 (UDP).
+- **The network starts empty.** See the Developer Guide below for registering test accounts and submitting casts.
+
+**Your own endpoint (optional).** To read from another node, for example a hosted node or a mainnet node you run elsewhere, set these in `.env`:
+
+| Variable | Purpose |
+|:---|:---|
+| `SNAPCHAIN_ENDPOINT` | `host:port` of the node's gRPC service. An `https://` prefix turns TLS on. |
+| `SNAPCHAIN_USE_TLS` | `true` to use TLS when the endpoint has no `https://` prefix. |
+| `SNAPCHAIN_API_KEY` | API key, if the provider requires one. |
+| `SNAPCHAIN_API_KEY_HEADER` | Header the key is sent in (default `x-api-key`). |
+
+Then restart the poller: `docker compose up -d poller`.
+
+Running your own mainnet node needs 16 GB of RAM and 1.5 TB of free disk; see the [Snapchain repository](https://github.com/farcasterxyz/snapchain).
+
+#### 4. Build and run
 
 ```bash
 make setup
@@ -199,7 +234,7 @@ make setup
 
 This clones the Snapchain repo for its `.proto` files, builds the images (the protos are compiled inside the poller image) and starts everything. The first build and first start are slow: the images include PyTorch and the embedding model is downloaded on startup.
 
-#### 4. Query the API at http://localhost:8000 (see the example calls above)
+#### 5. Query the API at http://localhost:8000 (see the example calls above)
 
 
 
@@ -226,3 +261,84 @@ kafka-console-consumer \
   --property print.value=true
 
 ```
+
+## Developer Guide
+
+### Applying code changes
+
+Not every service picks up edits the same way. Service names are the ones in `docker-compose.yml`.
+
+| Service | Code | After editing |
+|:---|:---|:---|
+| `poller` | `producers/` | `docker compose build poller && docker compose up -d poller` |
+| `semantic-consumer` | `consumers/` | `docker compose build semantic-consumer && docker compose up -d semantic-consumer` |
+| `consumer` (analytics) | `analytics/`, `consumers/` | `docker compose restart consumer` |
+| `ozi-api` | `rag/` | `docker compose restart ozi-api` |
+
+The poller and the semantic consumer run the copy of the code built into their image, so they need a rebuild. The other two run the mounted source and only need a restart.
+
+### Testing against the local Snapchain network
+
+The devnet starts with no accounts and no casts. Snapchain's `fc` CLI, which is inside the node containers, creates both. Run these from the `snapchain/` folder.
+
+Register two test accounts (fids). The command prints a signer secret for each; keep them for the next step.
+
+```bash
+docker compose exec -T node1 ./fc devnet bootstrap \
+  --network devnet --node http://localhost:3381 --grpc-node http://localhost:3383 \
+  --auth dev:dev --fid 1001 --count 2
+```
+
+Submit a cast, and a follow:
+
+```bash
+docker compose exec -T node1 ./fc cast-add \
+  --network devnet --node http://localhost:3381 \
+  --fid 1001 --signer-secret <secret for 1001> --text "hello from the devnet"
+
+docker compose exec -T node1 ./fc link add \
+  --network devnet --node http://localhost:3381 \
+  --fid 1002 --target-fid 1001 --signer-secret <secret for 1002>
+```
+
+Each fid lives on one shard, so using two or more fids exercises more than one shard.
+
+### Following an event through the pipeline
+
+```bash
+# 1. Poller published it
+docker logs --since 1m ozi-poller | grep "Sent event"
+
+# 2. It is in Kafka (message counts per topic)
+docker exec kafka kafka-run-class kafka.tools.GetOffsetShell \
+  --bootstrap-server localhost:9092 --topic 'farcaster.events.*'
+
+# 3. It is in Postgres
+docker exec ozi-postgres psql -U <POSTGRES_USER> -d ozi \
+  -c "select fid, left(text, 40) from casts order by idx_time desc limit 5"
+
+# 4. It is in Qdrant
+curl -s localhost:6333/collections/farcaster_casts
+```
+
+Both consumers write only when 100 events have been buffered. A handful of test casts will reach Kafka but will not appear in Postgres or Qdrant until the batch fills, so submit at least 100 to test those stages.
+
+### Linting and formatting
+
+These run on the host and need [Poetry](https://python-poetry.org/) (`poetry install` once):
+
+```bash
+make format       # black and isort
+make lint         # flake8
+make type-check   # mypy
+```
+
+There is no automated test suite yet.
+
+### Troubleshooting
+
+- **Kafka exits with `NodeExistsException` after Docker restarts.** Its previous registration in Zookeeper has not expired yet. Wait about 20 seconds and run `docker compose up -d kafka`.
+- **The poller logs "failed to connect" in a loop.** No node is listening at `SNAPCHAIN_ENDPOINT`. Start the devnet with `make snapchain-up` or check the endpoint.
+- **Containers exit with code 137.** Docker ran out of memory. Raise Docker's memory limit.
+- **Port 8000, 5432 or 6379 is already in use.** Set `API_HOST_PORT`, `POSTGRES_HOST_PORT` or `REDIS_HOST_PORT` in `.env`.
+- **`/search` returns 500.** Check that `OPENAI_API_KEY` in `.env` is a real key; `docker logs ozi-api` shows the error.
