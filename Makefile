@@ -2,7 +2,7 @@
 
 
 SNAPCHAIN_REPO=https://github.com/farcasterxyz/snapchain.git
-PROTO_SRC=./snapchain/proto/farcaster
+PROTO_SRC=./snapchain/proto/definitions
 PROTO_DST=./proto
 
 format:
@@ -29,7 +29,7 @@ create-user:
 clone-snapchain:
 	@if [ ! -d "./snapchain" ]; then \
 		echo "Cloning Snapchain..."; \
-		git clone $(SNAPCHAIN_REPO); \
+		git clone --depth 1 $(SNAPCHAIN_REPO); \
 	else \
 		echo "Snapchain already cloned."; \
 	fi
@@ -39,13 +39,9 @@ copy-protos: clone-snapchain
 	@cp -r $(PROTO_SRC)/*.proto $(PROTO_DST)/
 	@echo "Copied proto files to $(PROTO_DST)"
 
+# The .proto files are compiled inside the poller image (see producers/Dockerfile),
+# so no host Python or grpcio-tools is needed.
 proto: copy-protos
-	@python -m grpc_tools.protoc \
-		-I$(PROTO_DST) \
-		--python_out=$(PROTO_DST) \
-		--grpc_python_out=$(PROTO_DST) \
-		$(PROTO_DST)/*.proto
-	@echo "Compiled proto files."
 
 clean-proto:
 	@rm -f $(PROTO_DST)/*_pb2.py $(PROTO_DST)/*_pb2_grpc.py
@@ -57,4 +53,4 @@ build: proto
 start:
 	@docker compose up -d
 
-setup: create-user build start
+setup: build start

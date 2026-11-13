@@ -73,13 +73,17 @@ class KafkaEmbedConsumer(Consumer):
 
     def ensure_collection_exists(self):
         try:
-            self.qdrant.recreate_collection(
+            existing = {c.name for c in self.qdrant.get_collections().collections}
+            if self.collection_name in existing:
+                logger.info("Collection %s already exists.", self.collection_name)
+                return
+            self.qdrant.create_collection(
                 collection_name=self.collection_name,
                 vectors_config=VectorParams(size=768, distance=Distance.COSINE),
             )
-            logger.info("Collection %s created or reset.", self.collection_name)
+            logger.info("Collection %s created.", self.collection_name)
         except Exception as e:
-            logger.warning("Failed to create or reset Qdrant collection: %s", str(e))
+            logger.warning("Failed to ensure Qdrant collection: %s", str(e))
 
     def process(self, messages):
         records = []

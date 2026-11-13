@@ -97,19 +97,24 @@ async def ensure_tables():
                 sql_query TEXT,
                 response_time_ms INT,
                 response JSONB,
+                search_mode TEXT,
                 created_at TIMESTAMPTZ DEFAULT NOW()
             );
         """)
+        await conn.execute(
+            "ALTER TABLE query_logs ADD COLUMN IF NOT EXISTS search_mode TEXT;"
+        )
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 fid TEXT PRIMARY KEY,
-                signer_uuid TEXT,
                 general_quota INT DEFAULT 20,
                 deep_quota INT DEFAULT 10,
-                network_quota INT DEFAULT 5,
                 created_at TIMESTAMPTZ DEFAULT NOW()
             );
         """)
+        await conn.execute(
+            "ALTER TABLE users DROP COLUMN IF EXISTS signer_uuid, DROP COLUMN IF EXISTS network_quota;"
+        )
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS logins (
                 id SERIAL PRIMARY KEY,
@@ -212,36 +217,27 @@ async def auth_user(request: Request):
     try:
         body = await request.json()
         fid = body.get("fid")
-        signer_uuid = body.get("signer_uuid")
 
-        if not fid or not signer_uuid:
-            return JSONResponse(status_code=400, content={"error": "Missing fid or signer_uuid"})
+        if not fid:
+            return JSONResponse(status_code=400, content={"error": "Missing fid"})
+        fid = str(fid)
 
         async with pg_pool.acquire() as conn:
             async with conn.transaction():
-                exists = await conn.fetchval(
-                    "SELECT 1 FROM users WHERE fid = $1 AND signer_uuid = $2;",
-                    fid, signer_uuid
+                await conn.execute(
+                    "INSERT INTO users (fid) VALUES ($1) ON CONFLICT (fid) DO NOTHING;",
+                    fid
                 )
-
-                if not exists:
-                    await conn.execute(
-                        "INSERT INTO users (fid, signer_uuid) VALUES ($1, $2);",
-                        fid, signer_uuid
-                    )
 
                 await conn.execute("INSERT INTO logins (fid) VALUES ($1);", fid)
 
                 row = await conn.fetchrow("""
-                    SELECT general_quota, deep_quota, network_quota
+                    SELECT general_quota, deep_quota
                     FROM users
-                    WHERE fid = $1
-                    ORDER BY created_at DESC
-                    LIMIT 1;
+                    WHERE fid = $1;
                 """, fid)
                 general_quota = row["general_quota"]
                 deep_quota = row["deep_quota"]
-                network_quota = row["network_quota"]
 
                 login_count = await conn.fetchval(
                     "SELECT COUNT(*) FROM logins WHERE fid = $1;", fid)
@@ -256,24 +252,19 @@ async def auth_user(request: Request):
                 """, fid))
                 general_count = counts.get("general", 0)
                 deep_count = counts.get("deep", 0)
-                network_count = counts.get("network", 0)
 
         return {
             "fid": fid,
-            "signer_uuid": signer_uuid,
             "general_quota": general_quota,
             "deep_quota": deep_quota,
             "login_attempts": login_count,
             "search_attempts_total": total_query_count,
             "search_attempts_general": general_count,
             "search_attempts_deep": deep_count,
-            "search_attempts_network": network_count,
             "general_quota_exceeded": general_quota <= general_count,
             "deep_quota_exceeded": deep_quota <= deep_count,
-            "network_quota_exceeded": network_quota <= network_count,
             "general_quota_remaining": general_quota - general_count,
             "deep_quota_remaining": deep_quota - deep_count,
-            "network_quota_remaining": network_quota - network_count,
             "status": "authenticated"
         }
 

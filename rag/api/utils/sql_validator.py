@@ -17,6 +17,13 @@ ALLOWED_FUNCTIONS = {
     "NOW", "DATE_PART", "EXTRACT", "TO_CHAR", "CURRENT_DATE", "CURRENT_TIMESTAMP", "AGE",
 }
 
+# SQL keywords that are legitimately followed by "(" but are not function calls.
+ALLOWED_KEYWORDS = {
+    "IN", "OVER", "AS", "AND", "OR", "NOT", "FROM", "JOIN", "ON", "WHERE", "EXISTS",
+    "ANY", "ALL", "FILTER", "USING", "UNION", "INTERSECT", "EXCEPT", "HAVING", "BY",
+    "WHEN", "THEN", "ELSE", "SELECT", "DISTINCT", "INTERVAL",
+}
+
 
 def validate_safe_sql(sql_query: str) -> None:
     print(f"Validating SQL: {sql_query}")
@@ -36,6 +43,6 @@ def validate_safe_sql(sql_query: str) -> None:
         for match in re.finditer(r"\b([A-Z_][A-Z_0-9]*)\s*\(", sql_clean.upper())
     }
 
-    disallowed = used_functions - ALLOWED_FUNCTIONS
+    disallowed = used_functions - ALLOWED_FUNCTIONS - ALLOWED_KEYWORDS
     if disallowed:
         raise ValueError(f"Unsafe SQL: uses disallowed functions: {', '.join(sorted(disallowed))}")
