@@ -26,3 +26,7 @@ coverage/
 
 # Docker files
 docker-compose.override.yml
+
+# Local runtime artifacts
+snapchain/
+postgres_data/

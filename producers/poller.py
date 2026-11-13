@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import time
 
 import grpc
@@ -16,7 +17,9 @@ from producers.config import (
     EMBEDDER_TOPIC,
 )
 
-SNAPCHAIN_SUBSCRIBE_ENDPOINT = "ec2-13-58-183-70.us-east-2.compute.amazonaws.com:3383"
+SNAPCHAIN_SUBSCRIBE_ENDPOINT = os.getenv(
+    "SNAPCHAIN_ENDPOINT", "host.docker.internal:3383"
+)
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
