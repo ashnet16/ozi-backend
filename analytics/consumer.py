@@ -1,42 +1,28 @@
-import base64
 import json
 import logging
 import os
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import psycopg2
 from kafka import KafkaConsumer
 from kafka.errors import KafkaError
 from psycopg2 import OperationalError
 from table_queries import (
+    TABLES,
     create_casts_table,
     create_comments_table,
     create_reactions_table,
+    migrate_to_hash_key,
+    primary_key_column,
 )
 
 from consumers.base import Consumer
 from consumers.config import ANALYTICS_TOPIC, BATCH_SIZE, EMBEDDER_TOPIC
+from consumers.utils import farcaster_ts_to_datetime, to_hex
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
-
-FARCASTER_EPOCH = datetime(2021, 10, 1, tzinfo=timezone.utc)
-
-
-def to_pg_ts(farcaster_ts: int) -> datetime:
-    try:
-        return FARCASTER_EPOCH + timedelta(seconds=int(farcaster_ts))
-    except Exception:
-        return datetime.now(timezone.utc)
-
-
-def b64_to_hex(b64_str):
-    try:
-        return base64.b64decode(b64_str + "==").hex()
-    except Exception:
-        return ""
-
 
 class KafkaAnalyticsConsumer(Consumer):
     def __init__(
@@ -82,6 +68,13 @@ class KafkaAnalyticsConsumer(Consumer):
                 cur.execute(create_casts_table())
                 cur.execute(create_comments_table())
                 cur.execute(create_reactions_table())
+                # Tables created before rows were keyed on the message hash.
+                for table in TABLES:
+                    cur.execute(primary_key_column(), (table,))
+                    row = cur.fetchone()
+                    if row and row[0] == "id":
+                        cur.execute(migrate_to_hash_key(table))
+                        logger.info("Migrated %s to the message-hash key.", table)
             logger.info("PostgreSQL tables ready.")
         except Exception as e:
             logger.error("Failed to ensure tables exist: %s", e)
@@ -114,7 +107,7 @@ class KafkaAnalyticsConsumer(Consumer):
         msg_raw = msg["raw"]
         msg_body = msg_raw["merge_message_body"]["message"]["data"]
         cast_info = msg.get("cast", {})
-        ts = to_pg_ts(msg_body.get("timestamp"))
+        ts = farcaster_ts_to_datetime(msg_body.get("timestamp"))
         return (
             int(msg_raw["id"]),
             msg.get("message_subtype", ""),
@@ -125,7 +118,7 @@ class KafkaAnalyticsConsumer(Consumer):
             json.dumps(cast_info.get("embeds", [])),
             json.dumps(cast_info.get("mentions", [])),
             msg.get("message_hash", ""),
-            b64_to_hex(msg.get("message_hash", "")),
+            to_hex(msg.get("message_hash", "")),
             datetime.now(timezone.utc),
         )
 
@@ -133,7 +126,7 @@ class KafkaAnalyticsConsumer(Consumer):
         msg_raw = msg["raw"]
         msg_body = msg_raw["merge_message_body"]["message"]["data"]
         cast_add_body = msg_body.get("cast_add_body", {})
-        ts = to_pg_ts(msg_body.get("timestamp"))
+        ts = farcaster_ts_to_datetime(msg_body.get("timestamp"))
         parent_hash_b64 = cast_add_body.get("parent_cast_id", {}).get("hash", "")
         return (
             int(msg_raw["id"]),
@@ -142,19 +135,19 @@ class KafkaAnalyticsConsumer(Consumer):
             ts,
             int(cast_add_body.get("parent_cast_id", {}).get("fid", 0)),
             parent_hash_b64,
-            b64_to_hex(parent_hash_b64),
+            to_hex(parent_hash_b64),
             cast_add_body.get("text", ""),
             msg.get("cast", {}).get("language", ""),
             json.dumps(msg.get("cast", {}).get("embeds", [])),
             msg.get("message_hash", ""),
-            b64_to_hex(msg.get("message_hash", "")),
+            to_hex(msg.get("message_hash", "")),
             datetime.now(timezone.utc),
         )
 
     def prepare_reaction_record(self, msg):
         msg_raw = msg["raw"]
         msg_body = msg_raw["merge_message_body"]["message"]["data"]
-        ts = to_pg_ts(msg_body.get("timestamp"))
+        ts = farcaster_ts_to_datetime(msg_body.get("timestamp"))
         target_hash_b64 = msg["reaction"].get("target_hash", "")
         return (
             int(msg_raw["id"]),
@@ -164,9 +157,9 @@ class KafkaAnalyticsConsumer(Consumer):
             msg["reaction"].get("type", ""),
             int(msg["reaction"].get("target_fid", 0)),
             target_hash_b64,
-            b64_to_hex(target_hash_b64),
+            to_hex(target_hash_b64),
             msg.get("message_hash", ""),
-            b64_to_hex(msg.get("message_hash", "")),
+            to_hex(msg.get("message_hash", "")),
             datetime.now(timezone.utc),
         )
 
@@ -179,7 +172,7 @@ class KafkaAnalyticsConsumer(Consumer):
                     """
                     INSERT INTO casts (id, msg_type, fid, msg_timestamp, text, lang, embeds, mentions, msg_hash, msg_hash_hex, idx_time)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (id) DO NOTHING;
+                    ON CONFLICT (msg_hash_hex) DO NOTHING;
                 """,
                     self.cast_buffer,
                 )
@@ -197,7 +190,7 @@ class KafkaAnalyticsConsumer(Consumer):
                     """
                     INSERT INTO comments (id, msg_type, fid, msg_timestamp, parent_fid, parent_hash, parent_hash_hex, text, lang, embeds, msg_hash, msg_hash_hex, idx_time)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (id) DO NOTHING;
+                    ON CONFLICT (msg_hash_hex) DO NOTHING;
                 """,
                     self.comment_buffer,
                 )
@@ -215,7 +208,7 @@ class KafkaAnalyticsConsumer(Consumer):
                     """
                     INSERT INTO reactions (id, msg_type, fid, msg_timestamp, reaction_type, target_fid, target_hash, target_hash_hex, msg_hash, msg_hash_hex, idx_time)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT (id) DO NOTHING;
+                    ON CONFLICT (msg_hash_hex) DO NOTHING;
                 """,
                     self.reaction_buffer,
                 )

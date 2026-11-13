@@ -46,7 +46,7 @@ Ozi's data ingestion and analytics pipeline is designed to prioritize:
 - **Live events only**: the poller subscribes from "now". Events emitted while it is down are not backfilled.
 - **Bulk insertion**: Records are buffered in memory and inserted in batches of 100 (per event type for Postgres, per 100 casts for Qdrant).
 - **Possible loss on stop or crash**: Kafka offsets are auto-committed while events are still in the in-memory buffer, and buffers are not flushed on shutdown, so up to one batch can be lost when a consumer stops. Delivery is therefore not strictly at-least-once.
-- **Idempotent inserts**: Postgres rows are keyed by event id with `ON CONFLICT DO NOTHING`, so replayed events do not create duplicates.
+- **Idempotent inserts**: Postgres rows are keyed by message hash with `ON CONFLICT DO NOTHING`, and Qdrant point ids are derived from the same hash, so replayed events do not create duplicates.
 
 ---
 
