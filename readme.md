@@ -5,26 +5,8 @@
 It streams casts, comments, and reactions from live events, embeds them for semantic retrieval, and stores structured event data for analytic SQL queries—all powered by Kafka, Postgres, Qdrant, and LLMs.
 Note: This repository contains only the local development environment for the MVP, run with Docker Compose. You may encounter reliability and availability issues as data scales, due to throughput and latency limitations inherent in the current Python-based implementation. We plan to rewrite several lower-level components in Rust as demand increases to improve performance and reduce latency.
 
-This repository (`ozi-backend`) is the backend: ingestion, storage and the JSON API. The web UI lives in a separate repository and talks to this API.
 
-
-```mermaid
-flowchart TD
-    SN["Snapchain node (gRPC)"] --> P["Poller (producers/)"]
-    P -->|casts| T1["Kafka: farcaster.events.add"]
-    P -->|reactions and other events| T2["Kafka: farcaster.events.other"]
-    P -->|unhandled events| T3["Kafka: farcaster.events.dlq"]
-    T1 --> E["Embedder consumer (consumers/)"]
-    T1 --> A["Analytics consumer (analytics/)"]
-    T2 --> A
-    E --> Q[("Qdrant: cast embeddings")]
-    A --> PG[("Postgres: casts, comments, reactions")]
-    UI["Web UI (separate repo)"] -->|"/auth, /search, /query"| API["FastAPI (rag/)"]
-    API -->|semantic search| Q
-    API -->|generated SQL| PG
-    API -->|classify, write SQL, summarize| LLM["OpenAI"]
-    API -->|response cache| R[("Redis")]
-```
+![OziArchitecture](./designs/mvp_current.png)
 
 
 ---
@@ -44,27 +26,45 @@ flowchart TD
 
 
 
-## System Behaviour
+##  System Guarantees
 
-What the current MVP does and does not guarantee.
+Ozi's data ingestion and analytics pipeline is designed to prioritize:
 
-### Availability
+---
 
-- The poller, both consumers and the API restart automatically if they crash or lose a startup race with Kafka or Postgres.
-- The poller reconnects to the Snapchain node every 3 seconds when the stream drops.
-- The analytics consumer reconnects to Postgres when the connection is lost.
+### 1. High Availability (HA)
 
-### Delivery
+- The Kafka analytics consumer is built to **restart automatically** after crashes or restarts.
+- Messages are consumed **continuously** and **buffers are flushed** to Postgres on normal exit or crash recovery.
+- If the consumer goes down temporarily, it will **reconnect and resume** from the latest Kafka offset without loss.
 
-- **Live events only**: the poller subscribes from "now". Events emitted while it is down are not backfilled.
-- **Batched writes**: events are buffered in memory and written in batches of 100 (per event type for Postgres, per 100 casts for Qdrant). On a quiet stream, recent events are not queryable until a batch fills.
-- **Possible loss on stop or crash**: Kafka offsets are auto-committed while events are still in the buffer, and there is no flush on shutdown, so up to one batch can be lost when a consumer stops.
-- **Idempotent inserts**: Postgres rows are keyed by event id with `ON CONFLICT DO NOTHING`, so replayed events do not create duplicates.
+---
 
-### Consistency
+### 2. Reliability
 
-- Eventually consistent: arrival order is not enforced and ingestion lags by up to one batch.
-- Only casts, comments and reactions are stored. Other event types are published to Kafka but ignored by the consumers; unhandled ones go to `farcaster.events.dlq`, which nothing reads yet.
+- **At least once processing**: Kafka guarantees messages are delivered at least once to the consumer.
+- **Bulk insertion**: Records are inserted in efficient batches for speed and to minimize memory usage.
+
+---
+
+### 3. Eventual Consistency
+
+- Ozi is designed to be **eventually consistent**:  
+  All valid Farcaster events (casts, comments, reactions) will eventually appear in Postgres.
+- **Small ingestion delays are acceptable** in favor of higher throughput and system resilience.
+- Queries reflect **near-real-time data** under normal operation.
+
+---
+
+### 4. System Principles
+
+| Principle | How Ozi Achieves It |
+|:---|:---|
+| High Availability | Consumer automatically reconnects to Kafka after crashes. |
+| Eventual Consistency | Message arrival order is not strictly enforced; data is ingested reliably over time. |
+| Efficient Batching | Messages are buffered by type and bulk inserted. |
+| Graceful Degradation | If traffic spikes, consumers process with slight delay without dropping data. |
+| Minimal Operator Overhead | Self-healing consumer design with automatic reconnection and flush logic. |
 
 ---
 
@@ -99,7 +99,7 @@ Ozi lets you explore Farcaster activity in real-time whether you're a researcher
 
 ### Ask Anything
 
-You can interact with Ozi using natural language or SQL. The LLM will translate your questions into queries against the analytics engine. The UI (separate repository) paginates the results (top 5).
+You can interact with Ozi using natural language or SQL. The LLM will translate your questions into queries against the analytics engine. The UI layer will paginate the results (top 5).
 
 **Try asking:**
 - _"Which Farcaster users mentioned “Ethereum” the most this week?"_
@@ -152,18 +152,6 @@ curl -G http://localhost:8000/query \
 - **[Docker + Docker Compose](https://docs.docker.com/compose/)** — Containerization and local orchestration of services
 
 
-## Project Status
-
-> Ozi is in early WIP. We’re building in public and welcoming feedback.
-
-- [x] Kafka ingestion
-- [x] Embedder master for LLM-based indexing
-- [x] Query API (FastAPI)
-- [ ] Analytics / dashboarding
-- [ ] Warpcast frame integration
-- [ ] Token/gov idea experiments
-
----
 
 ## API Endpoints
 
@@ -175,7 +163,7 @@ curl -G http://localhost:8000/query \
 | `GET`  | `/health`  | Health check to verify the API can reach Postgres |
 | `GET`  | `/queries` | Returns the most recent queries received by Ozi (default 100) |
 
-This repository serves the JSON API only; the web UI that calls it lives in a separate repository.
+There is no web UI; the API is JSON only.
 
 
 ## Getting Started
@@ -185,8 +173,8 @@ Requirements: Docker (with Compose), `make` and `git`. No host Python is needed.
 #### 1. Clone
 
 ```bash
-git clone <ozi-backend repo url>
-cd ozi-backend
+git clone https://github.com/ashnet16/ozi.git
+cd ozi
 ```
 
 #### 2. Configure
@@ -212,9 +200,7 @@ This clones the Snapchain repo for its `.proto` files, builds the images (the pr
 
 
 
-#### Kafka topics
-
-The topics are created automatically on first use. To create or inspect them by hand, open a shell in the Kafka container first (`docker exec -it kafka bash`):
+#### Below are the Kafka Topics
 
 ```
 kafka-topics --bootstrap-server localhost:9092 \
