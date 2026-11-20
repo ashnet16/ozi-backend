@@ -342,3 +342,15 @@ There is no automated test suite yet.
 - **Containers exit with code 137.** Docker ran out of memory. Raise Docker's memory limit.
 - **Port 8000, 5432 or 6379 is already in use.** Set `API_HOST_PORT`, `POSTGRES_HOST_PORT` or `REDIS_HOST_PORT` in `.env`.
 - **`/search` returns 500.** Check that `OPENAI_API_KEY` in `.env` is a real key; `docker logs ozi-api` shows the error.
+
+## Contributing
+
+Contributions are welcome. Every commit must be signed off under the [Developer Certificate of Origin](https://developercertificate.org); see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+Copyright (c) 2025 Ozi Labs LLC.
+
+Ozi is licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-only). You can use, modify and redistribute it. If you distribute a modified version, or run one as a service that other people use over a network, you must make your modified source code available to those users under the same license.
+
+Versions released before this change remain available under the MIT License.
