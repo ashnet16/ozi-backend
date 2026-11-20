@@ -1,4 +1,3 @@
-import base64
 import json
 import logging
 import re
@@ -14,6 +13,7 @@ from sentence_transformers import SentenceTransformer
 
 from consumers.base import Consumer
 from consumers.config import BATCH_SIZE, CAST_ADD_MSG, EMBEDDER_TOPIC
+from consumers.utils import farcaster_ts_to_datetime, to_hex
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -39,19 +39,6 @@ def set_defaults(record):
         else:
             safe_record[k] = str(v)
     return safe_record
-
-def safe_unix_timestamp(ts):
-    try:
-        return datetime.fromtimestamp(float(ts), tz=timezone.utc).isoformat()
-    except Exception:
-        logger.warning(f"Failed to parse timestamp: {ts}")
-        return datetime.now(tz=timezone.utc).isoformat()
-
-def b64_to_hex(b64_str):
-    try:
-        return base64.b64decode(b64_str + "==").hex()
-    except Exception:
-        return ""
 
 class KafkaEmbedConsumer(Consumer):
     def __init__(self, embedder_hosts, topics, group_id="ozi-embed-consumer-group"):
@@ -97,9 +84,9 @@ class KafkaEmbedConsumer(Consumer):
             text = cast.get("text")
             language = cast.get("language", "")
             fid = msg.get("fid")
-            timestamp = safe_unix_timestamp(msg.get("timestamp"))
+            timestamp = farcaster_ts_to_datetime(msg.get("timestamp")).isoformat()
             message_hash = msg.get("message_hash")
-            message_hash_hex = b64_to_hex(message_hash)
+            message_hash_hex = to_hex(message_hash)
 
             raw_data = (
                 msg.get("raw", {})
@@ -112,7 +99,7 @@ class KafkaEmbedConsumer(Consumer):
             parent_cast = cast_body.get("parent_cast_id", {})
             parent_url = cast_body.get("parent_url", cast.get("parent_url"))
             parent_hash_b64 = parent_cast.get("hash") or cast.get("parent_hash")
-            parent_hash_hex = b64_to_hex(parent_hash_b64) if parent_hash_b64 else ""
+            parent_hash_hex = to_hex(parent_hash_b64)
 
             is_comment = bool(parent_cast or parent_url or parent_hash_b64)
 
@@ -131,7 +118,9 @@ class KafkaEmbedConsumer(Consumer):
                 "message_hash_hex": message_hash_hex,
                 "consumer_ts": consumer_ts,
                 "is_comment": is_comment,
-                "vector_id": str(uuid.uuid4()),
+                # Derived from the hash, so a replayed cast overwrites its own point
+                # instead of adding a duplicate.
+                "vector_id": str(uuid.uuid5(uuid.NAMESPACE_OID, message_hash_hex)),
                 "parent_fid": parent_cast.get("fid", "") if parent_cast else "",
                 "parent_hash": parent_hash_b64 or "",
                 "parent_hash_hex": parent_hash_hex,

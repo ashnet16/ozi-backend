@@ -45,14 +45,48 @@ class KafkaJSONTopic(KafkaTopic):
             logger.error("Failed to send to Kafka: %s", e)
 
 
+def _env_flag(name):
+    return os.getenv(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def open_channel(end_point, use_tls=False):
+    """Open a gRPC channel to a Snapchain node.
+
+    The endpoint is `host:port`. An `https://` prefix (or SNAPCHAIN_USE_TLS)
+    selects TLS, for hosted nodes; a node on your own machine is plaintext.
+    """
+    if end_point.startswith("https://"):
+        end_point, use_tls = end_point[len("https://") :], True
+    elif end_point.startswith("http://"):
+        end_point = end_point[len("http://") :]
+    end_point = end_point.rstrip("/")
+
+    if use_tls:
+        return grpc.secure_channel(end_point, grpc.ssl_channel_credentials())
+    return grpc.insecure_channel(end_point)
+
+
 class SnapchainGRPCPoller(Poller):
     def __init__(self, end_point=SNAPCHAIN_SUBSCRIBE_ENDPOINT):
         super().__init__(end_point, "snapchain_grpc")
-        self.channel = grpc.insecure_channel(end_point)
-        self.stub = rpc_pb2_grpc.HubServiceStub(self.channel)
+        self.end_point = end_point
+        # Hosted nodes usually want an API key, sent as a request header.
+        api_key = os.getenv("SNAPCHAIN_API_KEY", "").strip()
+        header = os.getenv("SNAPCHAIN_API_KEY_HEADER", "x-api-key").strip().lower()
+        self.metadata = [(header, api_key)] if api_key else None
+        self.channel = None
+        self.connect()
         self.topic_main = KafkaJSONTopic(EMBEDDER_TOPIC, topic_type=CAST_ADD_MSG)
         self.topic_other = KafkaJSONTopic(ANALYTICS_TOPIC, topic_type="other")
         self.topic_dlq = KafkaJSONTopic(DLQ_TOPIC, topic_type="dlq")
+
+    def connect(self):
+        """(Re)open the channel. A channel that has failed for a long time backs
+        off and can keep reporting a stale error after the node is reachable."""
+        if self.channel is not None:
+            self.channel.close()
+        self.channel = open_channel(self.end_point, _env_flag("SNAPCHAIN_USE_TLS"))
+        self.stub = rpc_pb2_grpc.HubServiceStub(self.channel)
 
     def poll(self):
         request = request_response_pb2.SubscribeRequest(
@@ -60,11 +94,12 @@ class SnapchainGRPCPoller(Poller):
         )
         while True:
             try:
-                for event in self.stub.Subscribe(request):
+                for event in self.stub.Subscribe(request, metadata=self.metadata):
                     yield event
             except grpc.RpcError as e:
                 logger.warning("Stream error: %s. Reconnecting in 3s...", e)
                 time.sleep(3)
+                self.connect()
 
     def publish(self, event):
         topic = self._select_topic(event)

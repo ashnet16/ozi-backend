@@ -77,6 +77,7 @@ You have access to the following PostgreSQL tables:
 
 Guidelines:
 - Always use `idx_time` instead of `msg_timestamp` when filtering by recency.
+- `msg_hash_hex` uniquely identifies a row. `id` is not unique; never count or join on it.
 - Join reactions or comments to casts via `target_hash_hex` → `msg_hash_hex`, or `parent_hash_hex` → `msg_hash_hex`.
 - Generate valid PostgreSQL SQL syntax.
 - If using a subquery in FROM, always give it an alias, e.g., FROM (SELECT ...) AS sub.
