@@ -189,7 +189,7 @@ class FarcasterMessageTransformer(EventTransformer):
                 ):
                     body = data.user_data_body
                     output["user_data"] = {
-                        "type": hub_event_pb2.UserDataType.Name(body.type),
+                        "type": message_pb2.UserDataType.Name(body.type),
                         "value": body.value,
                     }
 
