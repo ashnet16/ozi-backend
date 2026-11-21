@@ -8,7 +8,8 @@ Thanks for helping improve Ozi. Bug reports, fixes, features and documentation a
 2. Fork the repository and create a branch from `main`.
 3. Make your change. Follow the setup and linting steps in the [Developer Guide](readme.md#developer-guide).
 4. Sign off every commit (see below).
-5. Open a pull request that explains what changed and how you tested it.
+5. Add a line describing your change under **Unreleased** in [CHANGELOG.md](CHANGELOG.md).
+6. Open a pull request that explains what changed and how you tested it.
 
 ## Developer Certificate of Origin
 

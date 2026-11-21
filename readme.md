@@ -343,6 +343,34 @@ There is no automated test suite yet.
 - **Port 8000, 5432 or 6379 is already in use.** Set `API_HOST_PORT`, `POSTGRES_HOST_PORT` or `REDIS_HOST_PORT` in `.env`.
 - **`/search` returns 500.** Check that `OPENAI_API_KEY` in `.env` is a real key; `docker logs ozi-api` shows the error.
 
+## Versioning
+
+ozi-backend follows [Semantic Versioning](https://semver.org). The version is set in `pyproject.toml`, each release is tagged `vX.Y.Z`, and every release is described in [CHANGELOG.md](CHANGELOG.md).
+
+A version number `MAJOR.MINOR.PATCH` changes as follows:
+
+| Part | Changes when |
+| --- | --- |
+| MAJOR | A breaking change to one of the interfaces below |
+| MINOR | New functionality that keeps those interfaces compatible |
+| PATCH | Bug fixes only |
+
+The interfaces covered are:
+
+- The Kafka event envelope. Its own `schema_version` field also changes when its format does.
+- The Postgres tables and the Qdrant collection, including a change that needs a migration or a rebuild.
+- The HTTP API's endpoints, request fields and response format.
+- Configuration: environment variables and `docker-compose.yml` services.
+
+While the version is below 1.0.0, the project is still settling, and a MINOR release may contain breaking changes. The changelog marks them.
+
+### Making a release
+
+1. Move the entries under **Unreleased** in `CHANGELOG.md` into a new section for the version, with the date.
+2. Set `version` in `pyproject.toml`.
+3. Commit, then tag the commit on `main`: `git tag -a vX.Y.Z -m "vX.Y.Z"` and `git push origin vX.Y.Z`.
+4. Create a GitHub release from the tag, using the changelog section as its notes.
+
 ## Contributing
 
 Contributions are welcome. Every commit must be signed off under the [Developer Certificate of Origin](https://developercertificate.org); see [CONTRIBUTING.md](CONTRIBUTING.md).

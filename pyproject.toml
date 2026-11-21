@@ -1,8 +1,9 @@
 [tool.poetry]
-name = "farcaster-grpc-client"
+name = "ozi-backend"
 version = "0.1.0"
-description = "Poller for Farcaster Hubble node using gRPC"
+description = "Real-time semantic search and analytics over Farcaster data from Snapchain"
 authors = ["Ashley Mitchell"]
+license = "AGPL-3.0-only"
 package-mode = false
 
 [tool.poetry.dependencies]
