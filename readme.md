@@ -1,5 +1,7 @@
 # Ozi
 
+> **ozi-backend is v2 of [Ozi](https://github.com/ashnet16/ozi)**, which is now archived. This version ingests from Snapchain instead of a Hubble node, stores embeddings in Qdrant instead of FAISS, runs locally with Docker Compose, and drops the Neynar social-graph features.
+
 **Ozi** is a real-time semantic search and analytics engine for decentralized social networks, starting with [Farcaster](https://www.farcaster.xyz).
 
 It streams casts, comments, and reactions from live events, embeds them for semantic retrieval, and stores structured event data for analytic SQL queries—all powered by Kafka, Postgres, Qdrant, and LLMs.
