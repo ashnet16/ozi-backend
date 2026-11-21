@@ -4,6 +4,14 @@ All notable changes to ozi-backend are recorded here. The format follows [Keep a
 
 ## [Unreleased]
 
+### Fixed
+
+- Profile updates (`USER_DATA_ADD`) are published to Kafka instead of failing in the poller and going to the dead-letter topic.
+
+### Removed
+
+- The unused DuckDB setup script (`analytics/init_db.py`). Postgres stores all analytics data.
+
 ## [0.1.0] - 2026-11-20
 
 First tagged release.
