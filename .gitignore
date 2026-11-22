@@ -1,7 +1,3 @@
-ozi/proto/*_pb2.py
-ozi/proto/*_pb2_grpc.py
-ozi/proto/__pycache__/
-ozi/analytics/consumers
 __pycache__/
 *.pyc
 *.pyo

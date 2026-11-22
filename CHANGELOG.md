@@ -11,10 +11,14 @@ All notable changes to ozi-backend are recorded here. The format follows [Keep a
 ### Fixed
 
 - Profile updates (`USER_DATA_ADD`) are published to Kafka instead of failing in the poller and going to the dead-letter topic.
+- The embedder image's default command runs `consumer` instead of the misspelled `comsumer.py`.
+- `analytics/readme.md` describes the tables as they are; it listed columns that do not exist.
 
 ### Removed
 
 - The unused DuckDB setup script (`analytics/init_db.py`). Postgres stores all analytics data.
+- Unused files: `sample_prompt.txt`, `build.py` (the poller image compiles the protos), the root `requirements.txt` (each service has its own) and `analytics/message_sample.json`.
+- The `grpc-poll` script entry in `pyproject.toml`, which pointed to a module that does not exist.
 
 ## [0.1.0] - 2026-11-20
 
