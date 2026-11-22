@@ -4,6 +4,10 @@ All notable changes to ozi-backend are recorded here. The format follows [Keep a
 
 ## [Unreleased]
 
+### Added
+
+- Test scenarios for cast and reaction removes in `analytics/message_sample.json`, with the expected result of each in `analytics/message_sample_expected.json`. The sample's timestamps are shifted to November 2026, so its hashes and signatures no longer verify.
+
 ### Changed
 
 - The readme identifies ozi-backend as v2 of the archived [Ozi](https://github.com/ashnet16/ozi) project.
@@ -17,7 +21,7 @@ All notable changes to ozi-backend are recorded here. The format follows [Keep a
 ### Removed
 
 - The unused DuckDB setup script (`analytics/init_db.py`). Postgres stores all analytics data.
-- Unused files: `sample_prompt.txt`, `build.py` (the poller image compiles the protos), the root `requirements.txt` (each service has its own) and `analytics/message_sample.json`.
+- Unused files: `sample_prompt.txt`, `build.py` (the poller image compiles the protos), and the root `requirements.txt` (each service has its own).
 - The `grpc-poll` script entry in `pyproject.toml`, which pointed to a module that does not exist.
 
 ## [0.1.0] - 2026-11-20
