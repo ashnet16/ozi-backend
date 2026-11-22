@@ -1,0 +1,110 @@
+{
+  "description": "Synthetic remove scenarios appended to message_sample.json. Hashes and signatures of synthetic events, and of all events after the timestamp shift, are not valid; do not submit them to a node.",
+  "timestamp_shift_seconds": 50016388,
+  "synthetic_event_ids": [
+    "556357271748610",
+    "556357271748611",
+    "556357271748612",
+    "556357271748613",
+    "556357271748614",
+    "556357271748615",
+    "556357271748616",
+    "556357271748617",
+    "556357271748618",
+    "556357271748619"
+  ],
+  "scenarios": [
+    {
+      "scenario": "cast_remove_top_level",
+      "add_hash_hex": "3177ff450560e451f8613e52449343c4069db73d",
+      "event_ids": [
+        "556357193936896",
+        "556357271748610"
+      ],
+      "expected": "cast is removed"
+    },
+    {
+      "scenario": "cast_remove_comment",
+      "add_hash_hex": "7fc0f8eaf8504258b8040f53c090724a84618709",
+      "event_ids": [
+        "556357181562880",
+        "556357271748611"
+      ],
+      "expected": "comment is removed"
+    },
+    {
+      "scenario": "cast_remove_orphan",
+      "add_hash_hex": "4d45785ea2b9d99aed9e2eb1b730a7f662f6ba6f",
+      "event_ids": [
+        "556357271748612"
+      ],
+      "expected": "remove is recorded; no cast row exists to hide"
+    },
+    {
+      "scenario": "reaction_remove_like",
+      "add_hash_hex": "2a5a24ecf76fb65623d2a7478754e688ceaffd84",
+      "target_fid": 1020116,
+      "target_hash_hex": "7e69e2efc97c2257e5c4ee40ffd6bc24eb8eb411",
+      "event_ids": [
+        "556357181562885",
+        "556357271748613"
+      ],
+      "expected": "like is inactive"
+    },
+    {
+      "scenario": "reaction_remove_recast",
+      "add_hash_hex": "f2ac095d09c68164cdced30c353462e77bcb764f",
+      "target_fid": 466111,
+      "target_hash_hex": "c09ef76a3c0b83e58c6cd77e09ca8fb91337ba5b",
+      "event_ids": [
+        "556357181562881",
+        "556357271748614"
+      ],
+      "expected": "recast is inactive"
+    },
+    {
+      "scenario": "reaction_remove_same_timestamp",
+      "add_hash_hex": "fa47f2ef20a8dd66bae04a2d44fab521234f3fb1",
+      "target_fid": 1020116,
+      "target_hash_hex": "d2d9c311742b743584ef6c9570e8ed81e53c0844",
+      "event_ids": [
+        "556357185724416",
+        "556357271748615"
+      ],
+      "expected": "like is inactive (remove wins a timestamp tie)"
+    },
+    {
+      "scenario": "reaction_remove_then_readd",
+      "add_hash_hex": "d0f6cc35670bea27fa4f2f2f00e8f07192185349",
+      "readd_hash_hex": "3366cb6d9f340cf7097ce347638bd313dfe11639",
+      "target_fid": 865719,
+      "target_hash_hex": "699226110212151035b0ac0155a6d9d5b0138de1",
+      "event_ids": [
+        "556357185724417",
+        "556357271748616",
+        "556357271748617"
+      ],
+      "expected": "like is active again (only the re-add row)"
+    },
+    {
+      "scenario": "reaction_remove_wrong_type",
+      "add_hash_hex": "1d3c8f01fbc2fe16ff79eeb1ba2fdbda0e33dd7a",
+      "target_fid": 355121,
+      "target_hash_hex": "fca0a1a925577a5fa5ecea795d2d6481a7a789bb",
+      "event_ids": [
+        "556357189939201",
+        "556357271748618"
+      ],
+      "expected": "like stays active (remove is for a recast that does not exist)"
+    },
+    {
+      "scenario": "reaction_remove_orphan",
+      "target_fid": 466111,
+      "target_hash_hex": "9c09a5114eaf88d648373b9e792bba6c8e2e20a6",
+      "event_ids": [
+        "556357271748619"
+      ],
+      "expected": "remove is recorded; no reaction row exists to hide"
+    }
+  ]
+}
