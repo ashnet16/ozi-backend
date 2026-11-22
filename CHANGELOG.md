@@ -10,6 +10,7 @@ All notable changes to ozi-backend are recorded here. The format follows [Keep a
 
 ### Changed
 
+- `.gitignore` also ignores virtualenvs and build output: `.venv/`, `venv/`, `dist/`, `build/`, `target/` and `node_modules/`.
 - The readme identifies ozi-backend as v2 of the archived [Ozi](https://github.com/ashnet16/ozi) project.
 
 ### Fixed

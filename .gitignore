@@ -1,3 +1,10 @@
+# Build output and dependencies
+node_modules/
+.venv/
+venv/
+target/
+dist/
+build/
 __pycache__/
 *.pyc
 *.pyo
