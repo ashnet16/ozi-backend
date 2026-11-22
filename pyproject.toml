@@ -22,6 +22,15 @@ mypy = "*"
 pytest = "*"
 pre-commit = "*"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# The services import each other the way their Docker images lay them out:
+# producers/ and analytics/ by bare module name (`from base import`, `import
+# table_queries`), the compiled protos by bare name, and rag/ as the API root.
+pythonpath = [".", "producers", "analytics", "proto", "rag"]
+addopts = "-ra"
+filterwarnings = ["ignore::DeprecationWarning"]
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"

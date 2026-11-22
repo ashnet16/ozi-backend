@@ -325,6 +325,17 @@ curl -s localhost:6333/collections/farcaster_casts
 
 Both consumers write only when 100 events have been buffered. A handful of test casts will reach Kafka but will not appear in Postgres or Qdrant until the batch fills, so submit at least 100 to test those stages.
 
+### Running the tests
+
+The tests run on the host and need [uv](https://docs.astral.sh/uv/) and git, not Docker:
+
+```bash
+make test                      # all tests
+make test ARGS="-k search -x"  # pass options to pytest
+```
+
+The first run creates `.venv` (Python 3.11), installs `tests/requirements.txt`, and clones Snapchain to compile its protos. The tests feed the events in `analytics/message_sample.json` through the real poller, both consumers and the API, using an embedded Postgres and an in-memory Qdrant. Kafka, OpenAI, Redis and the embedding model are faked. See [tests/README.md](tests/README.md) for details.
+
 ### Linting and formatting
 
 These run on the host and need [Poetry](https://python-poetry.org/) (`poetry install` once):
@@ -334,8 +345,6 @@ make format       # black and isort
 make lint         # flake8
 make type-check   # mypy
 ```
-
-There is no automated test suite yet.
 
 ### Troubleshooting
 

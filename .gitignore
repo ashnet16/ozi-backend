@@ -19,3 +19,4 @@ __pycache__/
 snapchain/
 proto/
 postgres_data/
+.pytest_cache/
