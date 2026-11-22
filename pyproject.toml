@@ -22,9 +22,6 @@ mypy = "*"
 pytest = "*"
 pre-commit = "*"
 
-[tool.poetry.scripts]
-grpc-poll = "producers.pollers:FarcasterGRPCPoller.run"
-
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"

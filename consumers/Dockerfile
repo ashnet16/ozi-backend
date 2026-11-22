@@ -11,4 +11,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY consumers/ ./
 
-CMD ["python", "comsumer.py"]
+CMD ["python", "-m", "consumer"]
