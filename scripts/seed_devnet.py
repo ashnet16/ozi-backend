@@ -284,7 +284,7 @@ def main():
     }
 
     print(f"""
-Expected state in Ozi once the removals feature works (texts contain "[seed {run}]"):
+Expected state in Ozi (texts contain "[seed {run}]"):
   visible   c1      likes 1 (B), recasts 1 (C), 1 reply (r1); r2 was deleted
   visible   c4      likes 2 (A, B)  B's like was removed, then added again;
                     C's unlike of a like it never made changes nothing
