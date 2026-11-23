@@ -133,7 +133,7 @@ def test_messages_are_applied_in_stream_order(pipeline):
     seen = []
     c = analytics_consumer.KafkaAnalyticsConsumer(topics=[ANALYTICS_TOPIC, EMBEDDER_TOPIC])
     c.process = lambda msg: seen.append(msg["message_hash"])
-    c.consume()
+    c.consume(stop_when_idle=True)
 
     produced = [
         samples.message_hash_hex(e)
@@ -143,3 +143,37 @@ def test_messages_are_applied_in_stream_order(pipeline):
         and samples.message_hash_hex(e) != samples.LANGDETECT_DROPPED_CAST
     ]
     assert seen == produced
+
+
+def test_consumers_write_partial_batches_once_the_flush_interval_passes(pipeline, monkeypatch):
+    # With a zero interval every message is past due, so each consumer writes
+    # after every message instead of holding them for BATCH_SIZE or the stream end.
+    import consumer as analytics_consumer
+    from consumers import consumer as semantic_consumer
+
+    monkeypatch.setattr(analytics_consumer, "FLUSH_INTERVAL_MS", 0)
+    monkeypatch.setattr(semantic_consumer, "FLUSH_INTERVAL_MS", 0)
+
+    cast_batches, embed_batches = [], []
+    Analytics = analytics_consumer.KafkaAnalyticsConsumer
+    Embed = semantic_consumer.KafkaEmbedConsumer
+    insert_casts, write_points = Analytics.bulk_insert_casts, Embed.write_to_qdrant
+
+    def recording_insert(self):
+        if self.cast_buffer:
+            cast_batches.append(len(self.cast_buffer))
+        return insert_casts(self)
+
+    def recording_write(self, records):
+        embed_batches.append(len(records))
+        return write_points(self, records)
+
+    monkeypatch.setattr(Analytics, "bulk_insert_casts", recording_insert)
+    monkeypatch.setattr(Embed, "write_to_qdrant", recording_write)
+
+    pipeline.run(samples.hub_events())
+
+    assert len(cast_batches) > 1 and max(cast_batches) == 1
+    assert len(embed_batches) > 1 and max(embed_batches) == 1
+    expected = samples.expected_cast_hashes() - {samples.LANGDETECT_DROPPED_CAST}
+    assert hashes(pipeline, "casts") == expected

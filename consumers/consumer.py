@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -12,7 +13,7 @@ from qdrant_client.models import Distance, PointStruct, VectorParams
 from sentence_transformers import SentenceTransformer
 
 from consumers.base import Consumer
-from consumers.config import BATCH_SIZE, CAST_ADD_MSG, EMBEDDER_TOPIC
+from consumers.config import BATCH_SIZE, CAST_ADD_MSG, EMBEDDER_TOPIC, FLUSH_INTERVAL_MS
 from consumers.utils import farcaster_ts_to_datetime, to_hex
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,8 @@ class KafkaEmbedConsumer(Consumer):
             value_deserializer=lambda m: json.loads(m.decode("utf-8")),
             enable_auto_commit=True,
             auto_offset_reset="earliest",
+            # Ends iteration after this long without a message, so the buffer gets written.
+            consumer_timeout_ms=FLUSH_INTERVAL_MS,
         )
 
         self.embed_model = SentenceTransformer("intfloat/multilingual-e5-base")
@@ -147,28 +150,49 @@ class KafkaEmbedConsumer(Consumer):
         self.qdrant.upsert(collection_name=self.collection_name, points=points)
         logger.info("Successfully wrote %d embeddings to Qdrant.", len(points))
 
-    def consume(self):
+    def flush(self, buffer):
+        """Embed and write the buffered messages. Returns what is left: the same
+        buffer if the Qdrant write failed (it is retried next flush), else []."""
+        if not buffer:
+            return buffer
+        records = self.process(buffer)
+        if not records:
+            return []  # nothing in it to embed
+        try:
+            self.write_to_qdrant(records)
+            return []
+        except Exception as e:
+            logger.error("Retrying Qdrant write next round: %s", str(e))
+            return buffer
+
+    def consume(self, stop_when_idle=False):
+        """Read the topics forever. The buffer is written when it reaches BATCH_SIZE,
+        when FLUSH_INTERVAL_MS has passed since the last write, and when no message
+        has arrived for FLUSH_INTERVAL_MS. With ``stop_when_idle``, return after
+        that first quiet spell instead of waiting for more."""
         logger.info("Started Kafka Embedder Consumer on topics: %s", self.topics)
+        interval = FLUSH_INTERVAL_MS / 1000
         buffer = []
-
-        for message in self.consumer:
+        last_flush = time.monotonic()
+        while True:
+            for message in self.consumer:
+                try:
+                    buffer.append(message.value)
+                    if len(buffer) >= BATCH_SIZE or time.monotonic() - last_flush >= interval:
+                        buffer = self.flush(buffer)
+                        last_flush = time.monotonic()
+                except KafkaError as e:
+                    logger.error("Kafka error: %s", str(e))
+                except Exception as e:
+                    logger.error("Unexpected error: %s", str(e))
+            # The topic has been quiet for FLUSH_INTERVAL_MS.
             try:
-                buffer.append(message.value)
-
-                if len(buffer) >= BATCH_SIZE:
-                    records = self.process(buffer)
-                    if records:
-                        try:
-                            self.write_to_qdrant(records)
-                            buffer = []  # Only clear on success
-                        except Exception as e:
-                            logger.error("Retrying Qdrant write next round: %s", str(e))
-                            # Optionally log to DLQ or file here
-
-            except KafkaError as e:
-                logger.error("Kafka error: %s", str(e))
+                buffer = self.flush(buffer)
             except Exception as e:
                 logger.error("Unexpected error: %s", str(e))
+            last_flush = time.monotonic()
+            if stop_when_idle:
+                return
 
 
 if __name__ == "__main__":

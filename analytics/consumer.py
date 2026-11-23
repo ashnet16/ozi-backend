@@ -18,7 +18,7 @@ from table_queries import (
 )
 
 from consumers.base import Consumer
-from consumers.config import ANALYTICS_TOPIC, BATCH_SIZE, EMBEDDER_TOPIC
+from consumers.config import ANALYTICS_TOPIC, BATCH_SIZE, EMBEDDER_TOPIC, FLUSH_INTERVAL_MS
 from consumers.utils import farcaster_ts_to_datetime, to_hex
 
 logger = logging.getLogger(__name__)
@@ -39,6 +39,8 @@ class KafkaAnalyticsConsumer(Consumer):
             value_deserializer=lambda m: json.loads(m.decode("utf-8")),
             enable_auto_commit=True,
             auto_offset_reset="earliest",
+            # Ends iteration after this long without a message, so buffers get written.
+            consumer_timeout_ms=FLUSH_INTERVAL_MS,
         )
 
         self.cast_buffer, self.comment_buffer, self.reaction_buffer = [], [], []
@@ -222,25 +224,40 @@ class KafkaAnalyticsConsumer(Consumer):
         self.bulk_insert_comments()
         self.bulk_insert_reactions()
 
-    def consume(self):
+    def buffers_full(self):
+        return (
+            len(self.cast_buffer) >= BATCH_SIZE
+            or len(self.comment_buffer) >= BATCH_SIZE
+            or len(self.reaction_buffer) >= BATCH_SIZE
+        )
+
+    def consume(self, stop_when_idle=False):
+        """Read the topics forever. Buffers are written when one reaches BATCH_SIZE,
+        when FLUSH_INTERVAL_MS has passed since the last write, and when no message
+        has arrived for FLUSH_INTERVAL_MS. With ``stop_when_idle``, return after
+        that first quiet spell instead of waiting for more."""
         logger.info("Starting Kafka analytics consumer for topics: %s", self.topics)
-        for message in self.consumer:
-            try:
-                self.process(message.value)
-                if (
-                    len(self.cast_buffer) >= BATCH_SIZE
-                    or len(self.comment_buffer) >= BATCH_SIZE
-                    or len(self.reaction_buffer) >= BATCH_SIZE
-                ):
-                    self.flush_buffers()
-            except OperationalError:
-                logger.warning("Lost PostgreSQL connection, reconnecting...")
-                self.connect_to_db()
-            except KafkaError as e:
-                logger.error("Kafka error: %s", str(e))
-            except Exception as e:
-                logger.error("Unexpected error: %s", str(e))
-        self.flush_buffers()
+        interval = FLUSH_INTERVAL_MS / 1000
+        last_flush = time.monotonic()
+        while True:
+            for message in self.consumer:
+                try:
+                    self.process(message.value)
+                    if self.buffers_full() or time.monotonic() - last_flush >= interval:
+                        self.flush_buffers()
+                        last_flush = time.monotonic()
+                except OperationalError:
+                    logger.warning("Lost PostgreSQL connection, reconnecting...")
+                    self.connect_to_db()
+                except KafkaError as e:
+                    logger.error("Kafka error: %s", str(e))
+                except Exception as e:
+                    logger.error("Unexpected error: %s", str(e))
+            # The topics have been quiet for FLUSH_INTERVAL_MS.
+            self.flush_buffers()
+            last_flush = time.monotonic()
+            if stop_when_idle:
+                return
 
 
 if __name__ == "__main__":
