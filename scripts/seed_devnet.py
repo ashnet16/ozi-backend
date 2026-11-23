@@ -10,9 +10,11 @@ What it does:
      the script can be re-run.
   2. Builds and signs messages itself (`fc` cannot send reactions) and submits
      them to node1's HTTP API, in phases with a pause between each:
-       adds      casts and a reply
+       adds      casts and replies
        reactions likes and recasts
-       removals  cast deletes and reaction removes, including edge cases
+       removals  cast and reply deletes and reaction removes, including edge cases
+       late adds a cast that already has a like, a cast that was already
+                 deleted, and a like re-added after it was removed
   3. Prints the state Ozi should end up in, and writes it as JSON with --manifest.
 
 Every run uses fresh cast texts, so each run adds a new, independent set.
@@ -235,6 +237,7 @@ def main():
     c4 = send("B cast c4 (kept)", cast_add(b, now(), text("B: snapchain removals test")))
     c5 = send("C cast c5 (kept)", cast_add(c, now(), text("C: just a regular cast")))
     r1 = send("B reply r1 to c1 (kept)", cast_add(b, now(), text("B: replying to A"), parent=cast_id(c1)))
+    r2 = send("C reply r2 to c1 (deleted later)", cast_add(c, now(), text("C: reply that will be deleted"), parent=cast_id(c1)))
     time.sleep(args.pause)
 
     print("\nPhase 2: reactions")
@@ -242,6 +245,7 @@ def main():
     send("C likes c1 (removed later)", reaction(c, now(), LIKE, cast_id(c1)))
     send("C recasts c1", reaction(c, now(), RECAST, cast_id(c1)))
     send("A likes c4", reaction(a, now(), LIKE, cast_id(c4)))
+    send("B likes c4 (removed, then re-added)", reaction(b, now(), LIKE, cast_id(c4)))
     send("B recasts c2 (removed later)", reaction(b, now(), RECAST, cast_id(c2)))
     send("C likes c2", reaction(c, now(), LIKE, cast_id(c2)))
     send("C likes c_late before it is cast", reaction(c, now(), LIKE, cast_id(late)))
@@ -250,37 +254,44 @@ def main():
     print("\nPhase 3: removals")
     send("A deletes c2", cast_remove(a, now(), c2.hash))
     send("A deletes c3", cast_remove(a, now(), c3.hash))
+    send("C deletes reply r2", cast_remove(c, now(), r2.hash))
     send("C removes like on c1", reaction(c, now(), LIKE, cast_id(c1), remove=True))
+    send("B removes like on c4", reaction(b, now(), LIKE, cast_id(c4), remove=True))
     send("B removes recast on c2 (deleted cast)", reaction(b, now(), RECAST, cast_id(c2), remove=True))
     send("C removes like on c4 it never added", reaction(c, now(), LIKE, cast_id(c4), remove=True))
     send("A deletes c_ghost before sending it", cast_remove(a, now(), ghost.hash))
     time.sleep(args.pause)
 
-    print("\nPhase 4: adds that arrive after their removal or reaction")
+    # After the removals phase's pause, so this like is timestamped after its removal.
+    print("\nPhase 4: late adds")
     submit("A cast c_late (already has a like)", late)
     submit("A cast c_ghost (already deleted)", ghost, expect_reject=True)
+    send("B likes c4 again after removing the like", reaction(b, now(), LIKE, cast_id(c4)))
 
     expected = {
         "run": run,
         "fids": {"A": a, "B": b, "C": c},
         "visible_casts": {
             "c1": {"hash": c1.hash.hex(), "likes": 1, "recasts": 1, "replies": 1},
-            "c4": {"hash": c4.hash.hex(), "likes": 1, "recasts": 0},
+            "c4": {"hash": c4.hash.hex(), "likes": 2, "recasts": 0},
             "c5": {"hash": c5.hash.hex(), "likes": 0, "recasts": 0},
             "c_late": {"hash": late.hash.hex(), "likes": 1, "recasts": 0},
         },
         "visible_replies": {"r1": {"hash": r1.hash.hex(), "parent": "c1"}},
         "deleted_casts": {"c2": c2.hash.hex(), "c3": c3.hash.hex(), "c_ghost": ghost.hash.hex()},
+        "deleted_replies": {"r2": r2.hash.hex()},
         "messages": log,
     }
 
     print(f"""
 Expected state in Ozi once the removals feature works (texts contain "[seed {run}]"):
-  visible   c1      likes 1 (B), recasts 1 (C), 1 reply (r1)
-  visible   c4      likes 1 (A)   C's unlike of a like it never made changes nothing
+  visible   c1      likes 1 (B), recasts 1 (C), 1 reply (r1); r2 was deleted
+  visible   c4      likes 2 (A, B)  B's like was removed, then added again;
+                    C's unlike of a like it never made changes nothing
   visible   c5      no reactions
   visible   c_late  likes 1 (C)   the like was sent before the cast
   visible   r1      reply to c1
+  gone      r2      reply to c1, deleted (comments table)
   gone      c2      deleted; its reactions should no longer count
   gone      c3      deleted
   never     c_ghost Snapchain rejects it, so Ozi only ever sees its CAST_REMOVE

@@ -314,7 +314,7 @@ make devnet-seed                              # needs uv; run with the devnet an
 make devnet-seed ARGS="--manifest seed.json"  # also write the expected end state as JSON
 ```
 
-It registers fids 2001 to 2003 (skipped if already registered; `--fid` changes the range), then sends casts and a reply, likes and recasts, and finally cast deletes and reaction removes. The removals include edge cases: a like sent before its cast, an unlike of a like that never existed, and a delete sent before its cast, which Snapchain then rejects. Each run tags its texts with a fresh `[seed <run>]` prefix and prints the casts, likes and recasts Ozi should end up with.
+It registers fids 2001 to 2003 (skipped if already registered; `--fid` changes the range), then sends casts and replies, likes and recasts, and then cast deletes, a reply delete and reaction removes. The removals include edge cases: a like sent before its cast, an unlike of a like that never existed, a like removed and then added again, and a delete sent before its cast, which Snapchain then rejects. Each run tags its texts with a fresh `[seed <run>]` prefix and prints the casts, likes and recasts Ozi should end up with.
 
 The poller only receives new events, so the script refuses to run while `ozi-poller` is down.
 
