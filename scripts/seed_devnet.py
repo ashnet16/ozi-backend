@@ -9,7 +9,7 @@ What it does:
      sharing one signer key. FIDs that already have that signer are skipped, so
      the script can be re-run.
   2. Builds and signs messages itself (`fc` cannot send reactions) and submits
-     them to node1's HTTP API, in three phases with a pause between each:
+     them to node1's HTTP API, in phases with a pause between each:
        adds      casts and a reply
        reactions likes and recasts
        removals  cast deletes and reaction removes, including edge cases
@@ -93,16 +93,12 @@ class Signer:
         )
 
 
-class Clock:
-    """Hands out strictly increasing Farcaster timestamps, starting a little in
-    the past so a fast run never produces timestamps in the future."""
-
-    def __init__(self):
-        self.t = int(time.time()) - FARCASTER_EPOCH - 120
-
-    def next(self):
-        self.t += 1
-        return self.t
+def now():
+    """The current Farcaster time, in seconds. Messages built in the same second
+    share a timestamp, which is fine unless one undoes the other: a reaction
+    remove must be later than its add. The --pause of at least 1s between the
+    reactions and removals phases guarantees that."""
+    return int(time.time()) - FARCASTER_EPOCH
 
 
 def data(fid, msg_type, ts, **body):
@@ -180,11 +176,13 @@ def main():
                    help="first of three consecutive test FIDs (default %(default)s)")
     p.add_argument("--auth", default="dev:dev", help="devnet admin RPC auth")
     p.add_argument("--pause", type=float, default=3.0,
-                   help="seconds between phases, so adds land in earlier blocks than removes")
+                   help="seconds between phases, at least 1 (default %(default)s)")
     p.add_argument("--manifest", type=Path, help="also write the expected end state as JSON here")
     p.add_argument("--no-poller-check", action="store_true",
                    help="don't require the ozi-poller container to be running")
     args = p.parse_args()
+    if args.pause < 1:
+        p.error("--pause must be at least 1 second, so removals are timestamped after their adds")
 
     if not args.no_poller_check and not poller_running():
         sys.exit("ozi-poller is not running, so it would miss these events. "
@@ -201,7 +199,6 @@ def main():
     a, b, c = args.fid, args.fid + 1, args.fid + 2
     bootstrap(node, [a, b, c], secret, signer.pubkey.hex(), args.auth)
 
-    clock = Clock()
     run = secrets.token_hex(3)
     failures = []
     log = []
@@ -228,35 +225,35 @@ def main():
         return f"[seed {run}] {n}"
 
     # Built up front so a reaction can target a cast before the cast is sent.
-    late = signer.message(cast_add(a, clock.next(), text("A: cast liked before it existed")))
-    ghost = signer.message(cast_add(a, clock.next(), text("A: cast deleted before it was sent")))
+    late = signer.message(cast_add(a, now(), text("A: cast liked before it existed")))
+    ghost = signer.message(cast_add(a, now(), text("A: cast deleted before it was sent")))
 
     print(f"\nPhase 1: adds (run {run})")
-    c1 = send("A cast c1 (kept)", cast_add(a, clock.next(), text("A: farcaster devnet hello")))
-    c2 = send("A cast c2 (deleted later)", cast_add(a, clock.next(), text("A: this cast will be deleted")))
-    c3 = send("A cast c3 (deleted, no reactions)", cast_add(a, clock.next(), text("A: short-lived cast")))
-    c4 = send("B cast c4 (kept)", cast_add(b, clock.next(), text("B: snapchain removals test")))
-    c5 = send("C cast c5 (kept)", cast_add(c, clock.next(), text("C: just a regular cast")))
-    r1 = send("B reply r1 to c1 (kept)", cast_add(b, clock.next(), text("B: replying to A"), parent=cast_id(c1)))
+    c1 = send("A cast c1 (kept)", cast_add(a, now(), text("A: farcaster devnet hello")))
+    c2 = send("A cast c2 (deleted later)", cast_add(a, now(), text("A: this cast will be deleted")))
+    c3 = send("A cast c3 (deleted, no reactions)", cast_add(a, now(), text("A: short-lived cast")))
+    c4 = send("B cast c4 (kept)", cast_add(b, now(), text("B: snapchain removals test")))
+    c5 = send("C cast c5 (kept)", cast_add(c, now(), text("C: just a regular cast")))
+    r1 = send("B reply r1 to c1 (kept)", cast_add(b, now(), text("B: replying to A"), parent=cast_id(c1)))
     time.sleep(args.pause)
 
     print("\nPhase 2: reactions")
-    send("B likes c1", reaction(b, clock.next(), LIKE, cast_id(c1)))
-    send("C likes c1 (removed later)", reaction(c, clock.next(), LIKE, cast_id(c1)))
-    send("C recasts c1", reaction(c, clock.next(), RECAST, cast_id(c1)))
-    send("A likes c4", reaction(a, clock.next(), LIKE, cast_id(c4)))
-    send("B recasts c2 (removed later)", reaction(b, clock.next(), RECAST, cast_id(c2)))
-    send("C likes c2", reaction(c, clock.next(), LIKE, cast_id(c2)))
-    send("C likes c_late before it is cast", reaction(c, clock.next(), LIKE, cast_id(late)))
+    send("B likes c1", reaction(b, now(), LIKE, cast_id(c1)))
+    send("C likes c1 (removed later)", reaction(c, now(), LIKE, cast_id(c1)))
+    send("C recasts c1", reaction(c, now(), RECAST, cast_id(c1)))
+    send("A likes c4", reaction(a, now(), LIKE, cast_id(c4)))
+    send("B recasts c2 (removed later)", reaction(b, now(), RECAST, cast_id(c2)))
+    send("C likes c2", reaction(c, now(), LIKE, cast_id(c2)))
+    send("C likes c_late before it is cast", reaction(c, now(), LIKE, cast_id(late)))
     time.sleep(args.pause)
 
     print("\nPhase 3: removals")
-    send("A deletes c2", cast_remove(a, clock.next(), c2.hash))
-    send("A deletes c3", cast_remove(a, clock.next(), c3.hash))
-    send("C removes like on c1", reaction(c, clock.next(), LIKE, cast_id(c1), remove=True))
-    send("B removes recast on c2 (deleted cast)", reaction(b, clock.next(), RECAST, cast_id(c2), remove=True))
-    send("C removes like on c4 it never added", reaction(c, clock.next(), LIKE, cast_id(c4), remove=True))
-    send("A deletes c_ghost before sending it", cast_remove(a, clock.next(), ghost.hash))
+    send("A deletes c2", cast_remove(a, now(), c2.hash))
+    send("A deletes c3", cast_remove(a, now(), c3.hash))
+    send("C removes like on c1", reaction(c, now(), LIKE, cast_id(c1), remove=True))
+    send("B removes recast on c2 (deleted cast)", reaction(b, now(), RECAST, cast_id(c2), remove=True))
+    send("C removes like on c4 it never added", reaction(c, now(), LIKE, cast_id(c4), remove=True))
+    send("A deletes c_ghost before sending it", cast_remove(a, now(), ghost.hash))
     time.sleep(args.pause)
 
     print("\nPhase 4: adds that arrive after their removal or reaction")
