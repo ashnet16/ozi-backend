@@ -90,3 +90,11 @@ snapchain-down:
 
 snapchain-logs:
 	@docker compose -f snapchain/docker-compose.yml logs -f node1
+
+# Submit synthetic casts, reactions and removals to the devnet (scripts/seed_devnet.py).
+# Needs the devnet and the Ozi stack running. Pass options with ARGS, e.g.
+# `make devnet-seed ARGS="--manifest seed.json"`.
+.PHONY: devnet-seed
+devnet-seed: proto-local
+	@uv pip install --quiet --python $(TEST_PYTHON) protobuf==5.29.6 pynacl==1.5.0 blake3==1.0.4
+	$(TEST_PYTHON) scripts/seed_devnet.py $(ARGS)

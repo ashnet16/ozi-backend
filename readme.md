@@ -305,6 +305,19 @@ docker compose exec -T node1 ./fc link add \
 
 Each fid lives on one shard, so using two or more fids exercises more than one shard.
 
+### Seeding the devnet with casts, reactions and removals
+
+`fc` has no reaction commands, so `make devnet-seed` runs `scripts/seed_devnet.py`, which signs and submits a fixed scenario itself:
+
+```bash
+make devnet-seed                              # needs uv; run with the devnet and `make setup` running
+make devnet-seed ARGS="--manifest seed.json"  # also write the expected end state as JSON
+```
+
+It registers fids 2001 to 2003 (skipped if already registered; `--fid` changes the range), then sends casts and a reply, likes and recasts, and finally cast deletes and reaction removes. The removals include edge cases: a like sent before its cast, an unlike of a like that never existed, and a delete sent before its cast, which Snapchain then rejects. Each run tags its texts with a fresh `[seed <run>]` prefix and prints the casts, likes and recasts Ozi should end up with.
+
+The poller only receives new events, so the script refuses to run while `ozi-poller` is down.
+
 ### Following an event through the pipeline
 
 ```bash
