@@ -7,6 +7,7 @@ All notable changes to ozi-backend are recorded here. The format follows [Keep a
 ### Added
 
 - Test scenarios for cast and reaction removes in `analytics/message_sample.json`, with the expected result of each in `analytics/message_sample_expected.json`. The sample's timestamps are shifted to November 2026, so its hashes and signatures no longer verify.
+- Two more removal scenarios in `make devnet-seed`: a reply that is deleted, and a like that is removed and then added again. The expected state and `--manifest` output include them, with a new `deleted_replies` entry.
 
 ### Changed
 
@@ -18,6 +19,7 @@ All notable changes to ozi-backend are recorded here. The format follows [Keep a
 - Profile updates (`USER_DATA_ADD`) are published to Kafka instead of failing in the poller and going to the dead-letter topic.
 - The embedder image's default command runs `consumer` instead of the misspelled `comsumer.py`.
 - `analytics/readme.md` describes the tables as they are; it listed columns that do not exist.
+- The readme describes the consumers' timed flush; it said they write only when a batch of 100 fills.
 
 ### Removed
 

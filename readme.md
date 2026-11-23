@@ -46,7 +46,7 @@ Ozi's data ingestion and analytics pipeline is designed to prioritize:
 ### 2. Reliability
 
 - **Live events only**: the poller subscribes from "now". Events emitted while it is down are not backfilled.
-- **Bulk insertion**: Records are buffered in memory and inserted in batches of 100 (per event type for Postgres, per 100 casts for Qdrant).
+- **Bulk insertion**: Records are buffered in memory and inserted in batches of up to 100 (per event type for Postgres, casts only for Qdrant). A partial batch is written once 2 seconds have passed since the last write, or when no event has arrived for 2 seconds (`FLUSH_INTERVAL_MS` in `consumers/config.py`).
 - **Possible loss on stop or crash**: Kafka offsets are auto-committed while events are still in the in-memory buffer, and buffers are not flushed on shutdown, so up to one batch can be lost when a consumer stops. Delivery is therefore not strictly at-least-once.
 - **Idempotent inserts**: Postgres rows are keyed by message hash with `ON CONFLICT DO NOTHING`, and Qdrant point ids are derived from the same hash, so replayed events do not create duplicates.
 
@@ -55,8 +55,8 @@ Ozi's data ingestion and analytics pipeline is designed to prioritize:
 ### 3. Eventual Consistency
 
 - Ozi is designed to be **eventually consistent**:  
-  Farcaster events (casts, comments, reactions) appear in Postgres once their batch fills, barring the loss case above.
-- **Small ingestion delays are acceptable** in favor of higher throughput. On a quiet stream, recent events are not queryable until a batch of 100 fills.
+  Farcaster events (casts, comments, reactions) appear in Postgres within about 2 seconds, barring the loss case above.
+- **Small ingestion delays are acceptable** in favor of higher throughput. On a quiet stream, recent events become queryable within about 2 seconds, once the flush interval passes.
 - Other event types are published to Kafka but ignored by the consumers; unhandled ones go to `farcaster.events.dlq`, which nothing reads yet.
 
 ---
@@ -66,7 +66,7 @@ Ozi's data ingestion and analytics pipeline is designed to prioritize:
 | Principle | How Ozi Achieves It |
 |:---|:---|
 | High Availability | Services restart automatically; the poller and analytics consumer reconnect to their upstreams. |
-| Eventual Consistency | Message arrival order is not strictly enforced; ingestion lags by up to one batch. |
+| Eventual Consistency | Message arrival order is not strictly enforced; ingestion lags by up to one batch or 2 seconds, whichever comes first. |
 | Efficient Batching | Messages are buffered by type and bulk inserted. |
 | Graceful Degradation | If traffic spikes, consumers fall behind and catch up from Kafka rather than dropping messages. |
 | Minimal Operator Overhead | Restart policies and automatic reconnection; no manual recovery steps. |
@@ -314,7 +314,7 @@ make devnet-seed                              # needs uv; run with the devnet an
 make devnet-seed ARGS="--manifest seed.json"  # also write the expected end state as JSON
 ```
 
-It registers fids 2001 to 2003 (skipped if already registered; `--fid` changes the range), then sends casts and a reply, likes and recasts, and finally cast deletes and reaction removes. The removals include edge cases: a like sent before its cast, an unlike of a like that never existed, and a delete sent before its cast, which Snapchain then rejects. Each run tags its texts with a fresh `[seed <run>]` prefix and prints the casts, likes and recasts Ozi should end up with.
+It registers fids 2001 to 2003 (skipped if already registered; `--fid` changes the range), then sends casts and replies, likes and recasts, and then cast deletes, a reply delete and reaction removes. The removals include edge cases: a like sent before its cast, an unlike of a like that never existed, a like removed and then added again, and a delete sent before its cast, which Snapchain then rejects. Each run tags its texts with a fresh `[seed <run>]` prefix and prints the casts, likes and recasts Ozi should end up with.
 
 The poller only receives new events, so the script refuses to run while `ozi-poller` is down.
 
@@ -336,7 +336,7 @@ docker exec ozi-postgres psql -U <POSTGRES_USER> -d ozi \
 curl -s localhost:6333/collections/farcaster_casts
 ```
 
-Both consumers write only when 100 events have been buffered. A handful of test casts will reach Kafka but will not appear in Postgres or Qdrant until the batch fills, so submit at least 100 to test those stages.
+Both consumers write a batch when 100 events have been buffered, or after 2 seconds otherwise, so a handful of test casts appears in Postgres and Qdrant within a few seconds.
 
 ### Running the tests
 
