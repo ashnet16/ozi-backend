@@ -19,6 +19,7 @@ All notable changes to ozi-backend are recorded here. The format follows [Keep a
 - Profile updates (`USER_DATA_ADD`) are published to Kafka instead of failing in the poller and going to the dead-letter topic.
 - The embedder image's default command runs `consumer` instead of the misspelled `comsumer.py`.
 - `analytics/readme.md` describes the tables as they are; it listed columns that do not exist.
+- The readme describes the consumers' timed flush; it said they write only when a batch of 100 fills.
 
 ### Removed
 
