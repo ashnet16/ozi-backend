@@ -172,10 +172,10 @@ class Pipeline:
         # Same topics as analytics/consumer.py's __main__.
         analytics_consumer.KafkaAnalyticsConsumer(
             topics=[ANALYTICS_TOPIC, EMBEDDER_TOPIC]
-        ).consume()
+        ).consume(stop_when_idle=True)
         semantic_consumer.KafkaEmbedConsumer(
             ["localhost:6333"], topics=[EMBEDDER_TOPIC]
-        ).consume()
+        ).consume(stop_when_idle=True)
 
     def run(self, events):
         self.publish(events)
@@ -186,11 +186,7 @@ class Pipeline:
 
 
 @pytest.fixture
-def pipeline(kafka, db, qdrant, monkeypatch):
-    from consumers import consumer as semantic_consumer
-
-    # The semantic consumer writes only when its buffer reaches BATCH_SIZE (100)
-    # and has no flush when the stream ends (issue #10), so a 36-cast sample would never be
-    # written. Writing every message keeps the test about routing and storage.
-    monkeypatch.setattr(semantic_consumer, "BATCH_SIZE", 1)
+def pipeline(kafka, db, qdrant):
+    # The sample is far below BATCH_SIZE, so the consumers store it through the
+    # flush they do when the topics go quiet.
     return Pipeline(kafka, db, qdrant)
