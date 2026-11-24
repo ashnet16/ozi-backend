@@ -5,9 +5,9 @@ make test                      # everything
 make test ARGS="-k search -x"  # pass options to pytest
 ```
 
-`make test` needs [uv](https://docs.astral.sh/uv/) and git, not Docker. The first
-run creates `.venv` (Python 3.11), installs `tests/requirements.txt`, clones
-Snapchain and compiles its protos into `./proto`; later runs reuse them.
+`make test` needs [uv](https://docs.astral.sh/uv/), not Docker or GitHub access. The
+first run creates `.venv` (Python 3.11), installs `tests/requirements.txt` from PyPI,
+and compiles the checked-in Snapchain protos in `./proto`; later runs reuse them.
 
 ## What runs for real
 

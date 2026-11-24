@@ -11,6 +11,7 @@ All notable changes to ozi-backend are recorded here. The format follows [Keep a
 
 ### Changed
 
+- The Snapchain `.proto` files are checked in under `proto/` (from Snapchain commit `ff247c1`), so `make test`, `make build` and `make devnet-seed` no longer clone Snapchain. `make proto` refreshes them. The devnet (`make snapchain-up`) still clones Snapchain to build its nodes.
 - `.gitignore` also ignores virtualenvs and build output: `.venv/`, `venv/`, `dist/`, `build/`, `target/` and `node_modules/`.
 - The readme identifies ozi-backend as v2 of the archived [Ozi](https://github.com/ashnet16/ozi) project.
 

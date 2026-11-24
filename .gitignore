@@ -17,6 +17,8 @@ __pycache__/
 
 # Local runtime artifacts
 snapchain/
-proto/
+# The Snapchain .proto files in proto/ are checked in; the code compiled from them is not.
+proto/*_pb2.py
+proto/*_pb2_grpc.py
 postgres_data/
 .pytest_cache/

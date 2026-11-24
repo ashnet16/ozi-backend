@@ -51,16 +51,17 @@ copy-protos: clone-snapchain
 	@cp -r $(PROTO_SRC)/*.proto $(PROTO_DST)/
 	@echo "Copied proto files to $(PROTO_DST)"
 
-# The .proto files are compiled inside the poller image (see producers/Dockerfile),
-# so no host Python or grpcio-tools is needed.
+# The Snapchain .proto files are checked in under ./proto (see proto/README.md), so
+# nothing else needs to clone Snapchain for them. `make proto` refreshes them from
+# Snapchain; delete ./snapchain first to pick up a newer Snapchain commit.
+# The poller image compiles them itself (see producers/Dockerfile).
 proto: copy-protos
 
-# Compile the protos on the host as well, for the tests. Generated files land in
-# ./proto (git-ignored); the poller image still compiles its own copy.
+# Compile the checked-in protos on the host for the tests and the seed script.
+# Generated files land in ./proto and are git-ignored; nothing is downloaded from GitHub.
 .PHONY: proto-local test-setup
 proto-local: $(TEST_PYTHON)
 	@if [ ! -f $(PROTO_DST)/rpc_pb2_grpc.py ]; then \
-		$(MAKE) proto && \
 		uv pip install --quiet --python $(TEST_PYTHON) grpcio-tools==1.71.0 && \
 		$(TEST_PYTHON) -m grpc_tools.protoc -I$(PROTO_DST) --python_out=$(PROTO_DST) \
 			--grpc_python_out=$(PROTO_DST) $(PROTO_DST)/*.proto; \
@@ -70,7 +71,7 @@ clean-proto:
 	@rm -f $(PROTO_DST)/*_pb2.py $(PROTO_DST)/*_pb2_grpc.py
 	@echo "Cleaned compiled proto files."
 
-build: proto
+build:
 	@docker compose build
 
 start:

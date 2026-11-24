@@ -234,7 +234,7 @@ Running your own mainnet node needs 16 GB of RAM and 1.5 TB of free disk; see th
 make setup
 ```
 
-This clones the Snapchain repo for its `.proto` files, builds the images (the protos are compiled inside the poller image) and starts everything. The first build and first start are slow: the images include PyTorch and the embedding model is downloaded on startup.
+This builds the images (the poller image compiles the Snapchain `.proto` files checked in under `proto/`) and starts everything. The first build and first start are slow: the images include PyTorch and the embedding model is downloaded on startup.
 
 #### 5. Query the API at http://localhost:8000 (see the example calls above)
 
@@ -340,14 +340,14 @@ Both consumers write a batch when 100 events have been buffered, or after 2 seco
 
 ### Running the tests
 
-The tests run on the host and need [uv](https://docs.astral.sh/uv/) and git, not Docker:
+The tests run on the host and need [uv](https://docs.astral.sh/uv/), not Docker:
 
 ```bash
 make test                      # all tests
 make test ARGS="-k search -x"  # pass options to pytest
 ```
 
-The first run creates `.venv` (Python 3.11), installs `tests/requirements.txt`, and clones Snapchain to compile its protos. The tests feed the events in `analytics/message_sample.json` through the real poller, both consumers and the API, using an embedded Postgres and an in-memory Qdrant. Kafka, OpenAI, Redis and the embedding model are faked. See [tests/README.md](tests/README.md) for details.
+The first run creates `.venv` (Python 3.11), installs `tests/requirements.txt`, and compiles the Snapchain protos checked in under `proto/`. Nothing is downloaded from GitHub. The tests feed the events in `analytics/message_sample.json` through the real poller, both consumers and the API, using an embedded Postgres and an in-memory Qdrant. Kafka, OpenAI, Redis and the embedding model are faked. See [tests/README.md](tests/README.md) for details.
 
 ### Linting and formatting
 
