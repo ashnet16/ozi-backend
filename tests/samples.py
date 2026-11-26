@@ -117,3 +117,32 @@ def make_event(message_type, fid=1, timestamp=185845800, body=None, event_id=1):
             },
         }
     )
+
+
+def removed_hashes():
+    """Hashes of the messages that later messages in the sample remove: every
+    entry of an event's ``deletedMessages``, plus each CAST_REMOVE's target
+    (which is recorded even when Snapchain had no copy of the cast)."""
+    removed = set()
+    for e in raw_events():
+        body = e.get("mergeMessageBody", {})
+        removed.update(b64_to_hex(m["hash"]) for m in body.get("deletedMessages", []))
+        target = message_data(e).get("castRemoveBody", {}).get("targetHash")
+        if target:
+            removed.add(b64_to_hex(target))
+    return removed
+
+
+def deleted_messages(event):
+    """``(hash_hex, MESSAGE_TYPE_*, fid)`` of each message an event displaced."""
+    return [
+        (b64_to_hex(m["hash"]), m["data"]["type"], int(m["data"]["fid"]))
+        for m in event.get("mergeMessageBody", {}).get("deletedMessages", [])
+    ]
+
+
+@lru_cache(maxsize=None)
+def removal_scenarios():
+    """The remove scenarios in ``analytics/message_sample_expected.json``, by name."""
+    data = json.loads((ROOT / "analytics" / "message_sample_expected.json").read_text())
+    return {s["scenario"]: s for s in data["scenarios"]}

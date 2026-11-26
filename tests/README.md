@@ -23,12 +23,14 @@ Snapchain and compiles its protos into `./proto`; later runs reuse them.
 
 To use your own Postgres instead of the embedded one, set
 `OZI_TEST_POSTGRES_URL=postgresql://user:pass@host:5432/dbname`. Every test drops
-and re-creates that database's `public` schema, so point it at a scratch database.
+that database's `public` and `api` schemas, so point it at a scratch database. The
+user needs `CREATEROLE`: the analytics consumer creates the `ozi_query` role.
 
 ## Files
 
 - `test_routing.py`: which Kafka topic each Snapchain message goes to, and its payload.
 - `test_pipeline.py`: events through the poller and both consumers into Postgres and Qdrant.
+- `test_removals.py`: cast deletes and reaction removes: `removed_messages`, the `live_*` views, Qdrant, and the read-only `ozi_query` role.
 - `test_search.py`: `/search` (analytic, semantic, both), caching, quota, logging, over piped-in data.
 - `samples.py`: loads the sample events and derives expected results straight from the JSON.
 - `fakes.py`, `conftest.py`: the stand-ins and fixtures above.

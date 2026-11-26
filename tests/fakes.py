@@ -56,25 +56,32 @@ class FakeKafka:
 
     def __init__(self):
         self.log = []  # [(topic, bytes)]
+        self.keys = []  # the message key of each log entry, serialized
 
     def messages(self, topic):
         return [value for t, value in self.log if t == topic]
 
     # Factories with the same signatures as kafka-python's classes.
-    def producer(self, bootstrap_servers=None, value_serializer=None, **_):
-        return _FakeProducer(self, value_serializer or (lambda v: v))
+    def producer(
+        self, bootstrap_servers=None, value_serializer=None, key_serializer=None, **_
+    ):
+        return _FakeProducer(
+            self, value_serializer or (lambda v: v), key_serializer or (lambda k: k)
+        )
 
     def consumer(self, *topics, value_deserializer=None, **_):
         return _FakeConsumer(self, topics, value_deserializer or (lambda v: v))
 
 
 class _FakeProducer:
-    def __init__(self, broker, serializer):
+    def __init__(self, broker, serializer, key_serializer):
         self.broker = broker
         self.serializer = serializer
+        self.key_serializer = key_serializer
 
-    def send(self, topic, value=None, **_):
+    def send(self, topic, value=None, key=None, **_):
         self.broker.log.append((topic, self.serializer(value)))
+        self.broker.keys.append(self.key_serializer(key))
 
     def flush(self, *_, **__):
         pass

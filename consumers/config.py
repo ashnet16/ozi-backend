@@ -1,6 +1,7 @@
 # Messages
 MSG_TYPE_PREFIX = "MESSAGE_TYPE"
 CAST_ADD_MSG = f"{MSG_TYPE_PREFIX}_CAST_ADD"
+CAST_REMOVE_MSG = f"{MSG_TYPE_PREFIX}_CAST_REMOVE"
 EMBEDDER_TOPIC = "farcaster.events.add"
 BATCH_SIZE = 100
 # The consumers also write a partial batch once this long has passed since their

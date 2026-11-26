@@ -83,15 +83,21 @@ def test_link_and_user_data_messages_are_not_stored(ingested):
     tables = {r[0] for r in ingested.query(
         "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public'"
     )}
-    assert tables == {"casts", "comments", "reactions"}
+    assert tables == {"casts", "comments", "reactions", "removed_messages"}
+    views = {r[0] for r in ingested.query(
+        "SELECT table_name FROM information_schema.views WHERE table_schema = 'api'"
+    )}
+    assert views == {"live_casts", "live_comments", "live_reactions"}
 
 
 def test_casts_with_text_are_embedded_in_qdrant(ingested):
+    # Deleted casts (here the "Agree completely" comment) have no point.
     expected = {
         samples.message_hash_hex(e)
         for e in samples.events_of_type("MESSAGE_TYPE_CAST_ADD")
         if samples.message_data(e).get("castAddBody", {}).get("text")
-    } - {samples.LANGDETECT_DROPPED_CAST}
+    } - {samples.LANGDETECT_DROPPED_CAST} - samples.removed_hashes()
+    assert "7fc0f8eaf8504258b8040f53c090724a84618709" not in expected
 
     points, _ = ingested.qdrant.scroll(COLLECTION, limit=1000, with_payload=True)
     payloads = {p.payload["message_hash_hex"]: p.payload for p in points}
@@ -139,7 +145,14 @@ def test_messages_are_applied_in_stream_order(pipeline):
         samples.message_hash_hex(e)
         for e in samples.raw_events()
         if samples.message_data(e).get("type")
-        in ("MESSAGE_TYPE_CAST_ADD", "MESSAGE_TYPE_REACTION_ADD", "MESSAGE_TYPE_LINK_ADD", "MESSAGE_TYPE_USER_DATA_ADD")
+        in (
+            "MESSAGE_TYPE_CAST_ADD",
+            "MESSAGE_TYPE_CAST_REMOVE",
+            "MESSAGE_TYPE_REACTION_ADD",
+            "MESSAGE_TYPE_REACTION_REMOVE",
+            "MESSAGE_TYPE_LINK_ADD",
+            "MESSAGE_TYPE_USER_DATA_ADD",
+        )
         and samples.message_hash_hex(e) != samples.LANGDETECT_DROPPED_CAST
     ]
     assert seen == produced

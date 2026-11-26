@@ -81,6 +81,9 @@ def pg_params():
         "POSTGRES_PASSWORD": params["password"],
         "POSTGRES_DB": params["dbname"],
         "OPENAI_API_KEY": "test-key-not-used",
+        # The read-only role the analytics consumer creates for generated SQL.
+        "OZI_QUERY_USER": "ozi_query",
+        "OZI_QUERY_PASSWORD": "ozi-query-test",
     }
     saved = {k: os.environ.get(k) for k in env}
     os.environ.update(env)
@@ -96,12 +99,15 @@ def pg_params():
 
 @pytest.fixture
 def db(pg_params):
-    """A connection to an empty database: the public schema is re-created
-    before each test, and the services create their own tables."""
+    """A connection to an empty database: the public and api schemas are
+    dropped before each test, and the services create their own tables."""
     conn = psycopg2.connect(**pg_params)
     conn.autocommit = True
     with conn.cursor() as cur:
-        cur.execute("DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;")
+        cur.execute(
+            "DROP SCHEMA IF EXISTS api CASCADE;"
+            " DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;"
+        )
     yield conn
     conn.close()
 

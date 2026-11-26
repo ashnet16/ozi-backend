@@ -66,6 +66,9 @@ services:
       - POSTGRES_DB=ozi
       - POSTGRES_USER=${POSTGRES_USER:?set POSTGRES_USER in .env}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # Creates this read-only role for the API's generated SQL.
+      - OZI_QUERY_USER=${OZI_QUERY_USER:-ozi_query}
+      - OZI_QUERY_PASSWORD=${OZI_QUERY_PASSWORD:?set OZI_QUERY_PASSWORD in .env}
     depends_on:
       - kafka
       - postgres
@@ -144,6 +147,8 @@ services:
       - POSTGRES_DB=ozi
       - POSTGRES_USER=${POSTGRES_USER:?set POSTGRES_USER in .env}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      - OZI_QUERY_USER=${OZI_QUERY_USER:-ozi_query}
+      - OZI_QUERY_PASSWORD=${OZI_QUERY_PASSWORD:?set OZI_QUERY_PASSWORD in .env}
       - REDIS_URL=redis://redis:6379
     depends_on:
       - qdrant
