@@ -57,7 +57,16 @@ Ozi's data ingestion and analytics pipeline is designed to prioritize:
 - Ozi is designed to be **eventually consistent**:  
   Farcaster events (casts, comments, reactions) appear in Postgres within about 2 seconds, barring the loss case above.
 - **Small ingestion delays are acceptable** in favor of higher throughput. On a quiet stream, recent events become queryable within about 2 seconds, once the flush interval passes.
+- **Removals**: deleted casts and removed reactions are recorded in `removed_messages`, not deleted from Postgres. Search reads the `live_*` views, which leave removed rows out. The embedder deletes a removed cast's point from Qdrant. See [Removals](#removals) for the limits.
 - Other event types are published to Kafka but ignored by the consumers; unhandled ones go to `farcaster.events.dlq`, which nothing reads yet.
+
+#### Removals
+
+- A cast remove is published to `farcaster.events.add` and a reaction remove to `farcaster.events.other`, the same topic as what each removes. Messages are keyed by fid, so a remove is consumed after its add.
+- A removal is recorded even when its cast or reaction was never stored, and recording it twice has no further effect.
+- A remove that arrives before its add still hides it in Postgres. In Qdrant, a cast still in the embedder's buffer when its remove arrives is never written, but a cast that arrives in a later batch than its remove is embedded.
+- Search responses are cached for up to an hour, so a cached answer can still include a cast deleted since.
+- Pruned and revoked messages, and unfollows (`LINK_REMOVE`), are not handled yet.
 
 ---
 
@@ -75,7 +84,7 @@ Ozi's data ingestion and analytics pipeline is designed to prioritize:
 
 ## Microservices and Components
 
-- **producers/** — Snapchain gRPC poller: transforms events and publishes them to Kafka
+- **producers/** — Snapchain gRPC poller: transforms events and publishes them to Kafka. `producers/handlers/` has one handler class per message type, which sets its payload and topic; supporting a new type means adding a handler, not changing the poller
 - **analytics/** — Kafka consumer writing casts, comments and reactions to Postgres
 - **consumers/** — Kafka consumer embedding casts into Qdrant
 - **rag/api/** — FastAPI app (`main.py`), vector search service, LLM prompts, SQL validator
@@ -84,8 +93,8 @@ Ozi's data ingestion and analytics pipeline is designed to prioritize:
 ---
 ## Data Flow
 
-Snapchain node → Poller → Kafka topics (`farcaster.events.add` for casts, `farcaster.events.other` for the rest)
-Kafka consumers → Postgres (casts/comments/reactions) + Qdrant (cast embeddings)
+Snapchain node → Poller → Kafka topics (`farcaster.events.add` for casts and cast removes, `farcaster.events.other` for the rest)
+Kafka consumers → Postgres (casts/comments/reactions, removed_messages, `live_*` views) + Qdrant (cast embeddings)
 FastAPI → /search → LLM classifies → (Semantic search OR SQL generation)
 FastAPI → /query → Full analytic query results
 
@@ -117,7 +126,7 @@ You can interact with Ozi using natural language or SQL. The LLM will translate 
 SELECT
   fid,
   COUNT(*) AS cast_count
-FROM casts
+FROM live_casts
 WHERE text ILIKE '%tariff%'
   AND idx_time >= NOW() - INTERVAL '7 days'
 GROUP BY fid
@@ -141,7 +150,7 @@ curl -X POST http://localhost:8000/search \
 # 3. Run a read-only SQL query directly
 curl -G http://localhost:8000/query \
   --data-urlencode "fid=123" \
-  --data-urlencode "sql=SELECT fid, COUNT(*) AS cast_count FROM casts GROUP BY fid ORDER BY cast_count DESC LIMIT 10;"
+  --data-urlencode "sql=SELECT fid, COUNT(*) AS cast_count FROM live_casts GROUP BY fid ORDER BY cast_count DESC LIMIT 10;"
 ```
 ---
 
@@ -188,7 +197,7 @@ cd ozi-backend
 cp .env.example .env
 ```
 
-Fill in `POSTGRES_USER`, `POSTGRES_PASSWORD` and `OPENAI_API_KEY`. Optionally set:
+Fill in `POSTGRES_USER`, `POSTGRES_PASSWORD`, `OZI_QUERY_PASSWORD` and `OPENAI_API_KEY`. `OZI_QUERY_PASSWORD` is the password of `ozi_query`, the read-only role the API runs generated SQL as; the analytics consumer creates it. Optionally set:
 
 - `POSTGRES_HOST_PORT`, `REDIS_HOST_PORT`, `API_HOST_PORT` if 5432 / 6379 / 8000 are already in use
 - `SNAPCHAIN_ENDPOINT` — gRPC address of the Snapchain node the poller subscribes to (default `host.docker.internal:3383`, i.e. a node running on your machine)

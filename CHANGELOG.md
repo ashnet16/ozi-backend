@@ -6,11 +6,16 @@ All notable changes to ozi-backend are recorded here. The format follows [Keep a
 
 ### Added
 
+- Support for cast deletes (`CAST_REMOVE`) and reaction removes (`REACTION_REMOVE`). The poller publishes cast removes to `farcaster.events.add` and reaction removes to `farcaster.events.other` instead of the dead-letter topic. The analytics consumer records each removed message in a new `removed_messages` table and keeps the original rows; new views `api.live_casts`, `api.live_comments` and `api.live_reactions` leave removed rows out. The embedder deletes a removed cast's point from Qdrant. Every handled message now carries a `removed` field listing the messages its merge displaced. (#29)
+- The API runs generated and `/query` SQL as a read-only role, `ozi_query`, that can read only the `live_*` views. Set `OZI_QUERY_PASSWORD` in `.env`.
+- Poller messages are keyed by fid, so each author's messages stay in order within a partition.
 - Test scenarios for cast and reaction removes in `analytics/message_sample.json`, with the expected result of each in `analytics/message_sample_expected.json`. The sample's timestamps are shifted to November 2026, so its hashes and signatures no longer verify.
 - Two more removal scenarios in `make devnet-seed`: a reply that is deleted, and a like that is removed and then added again. The expected state and `--manifest` output include them, with a new `deleted_replies` entry.
 
 ### Changed
 
+- The poller looks up a handler class per message type in `producers/handlers/` instead of branching on the type; adding a type means adding a handler. A handler error's dead-letter reason now names the handler, e.g. `Transformation error: CastAddHandler failed: …`.
+- The SQL prompt describes the `live_*` views instead of the tables.
 - `.gitignore` also ignores virtualenvs and build output: `.venv/`, `venv/`, `dist/`, `build/`, `target/` and `node_modules/`.
 - The readme identifies ozi-backend as v2 of the archived [Ozi](https://github.com/ashnet16/ozi) project.
 
