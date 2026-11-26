@@ -78,6 +78,26 @@ pg_conn = psycopg2.connect(
 pg_conn.autocommit = True
 cur = pg_conn.cursor()
 
+# Generated and client-supplied SQL runs on its own connection, as a read-only
+# role that can read only the live_* views (the analytics consumer creates it).
+# Opened on first use, so the API can start before that role exists.
+query_conn = None
+
+
+def query_cursor():
+    global query_conn
+    if query_conn is None or query_conn.closed:
+        query_conn = psycopg2.connect(
+            dbname=os.getenv("POSTGRES_DB", "ozi"),
+            user=os.getenv("OZI_QUERY_USER", "ozi_query"),
+            password=os.getenv("OZI_QUERY_PASSWORD", ""),
+            host=os.getenv("POSTGRES_HOST", "localhost"),
+            port=os.getenv("POSTGRES_PORT", "5432"),
+            options="-c search_path=api -c default_transaction_read_only=on",
+        )
+        query_conn.autocommit = True
+    return query_conn.cursor()
+
 @app.get("/health")
 def health_check():
     try:
@@ -196,8 +216,9 @@ async def search_router(request: QueryRequest):
         sql_code = clean_sql(clean_llm_sql(await llm_client.ask(sql_prompt)))
         validate_safe_sql(sql_code)
         sql_code_for_log = sql_code
-        cur.execute(sql_code)
-        short_results = cur.fetchall()[:request.n_results]
+        with query_cursor() as query_cur:
+            query_cur.execute(sql_code)
+            short_results = query_cur.fetchall()[:request.n_results]
         flat_rows = [", ".join(map(str, row)) for row in short_results]
         summary = await llm_client.ask(summarization_prompt(request.query, flat_rows))
         sql_encoded = quote(sql_code)
@@ -280,9 +301,10 @@ async def query_full(sql: str, fid: str = None):
         return JSONResponse(status_code=403, content={"error": error})
     sql_code = clean_sql(clean_llm_sql(sql.strip()))
     validate_safe_sql(sql_code)
-    cur.execute(sql_code)
-    rows = cur.fetchall()
-    columns = [desc[0] for desc in cur.description]
+    with query_cursor() as query_cur:
+        query_cur.execute(sql_code)
+        rows = query_cur.fetchall()
+        columns = [desc[0] for desc in query_cur.description]
     results = [dict(zip(columns, row)) for row in rows]
     log_query(fid, sql_code, [], sql_code, json.loads(json.dumps({"results": results}, default=str)), start)
     return {"results": results}

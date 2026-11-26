@@ -10,9 +10,12 @@ from kafka.errors import KafkaError
 from psycopg2 import OperationalError
 from table_queries import (
     TABLES,
+    create_api_views,
     create_casts_table,
     create_comments_table,
+    create_query_role,
     create_reactions_table,
+    create_removed_messages_table,
     migrate_to_hash_key,
     primary_key_column,
 )
@@ -23,6 +26,15 @@ from consumers.utils import farcaster_ts_to_datetime, to_hex
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
+# Why a message's ``removed`` entries were removed, by the type of the message
+# that removed them. An add that displaces a message replaces it.
+REMOVAL_REASONS = {
+    "CAST_REMOVE": "cast_remove",
+    "REACTION_REMOVE": "reaction_remove",
+    "CAST_ADD": "replaced",
+    "REACTION_ADD": "replaced",
+}
 
 class KafkaAnalyticsConsumer(Consumer):
     def __init__(
@@ -44,6 +56,7 @@ class KafkaAnalyticsConsumer(Consumer):
         )
 
         self.cast_buffer, self.comment_buffer, self.reaction_buffer = [], [], []
+        self.removal_buffer = []
         self.connect_to_db()
         self.ensure_tables_exist()
 
@@ -77,9 +90,24 @@ class KafkaAnalyticsConsumer(Consumer):
                     if row and row[0] == "id":
                         cur.execute(migrate_to_hash_key(table))
                         logger.info("Migrated %s to the message-hash key.", table)
+                cur.execute(create_removed_messages_table())
+                # After the table changes above, so the views have every column.
+                cur.execute(create_api_views())
             logger.info("PostgreSQL tables ready.")
         except Exception as e:
             logger.error("Failed to ensure tables exist: %s", e)
+        self.ensure_query_role()
+
+    def ensure_query_role(self):
+        """Create or update the read-only role the API runs generated SQL as."""
+        role = os.getenv("OZI_QUERY_USER", "ozi_query")
+        try:
+            with self.conn.cursor() as cur:
+                for statement in create_query_role(role, os.getenv("OZI_QUERY_PASSWORD")):
+                    cur.execute(statement)
+            logger.info("Query role %s ready.", role)
+        except Exception as e:
+            logger.error("Failed to ensure query role %s: %s", role, e)
 
     def process(self, msg):
         logger.info(f"[ANALYTICS] Received message: {json.dumps(msg)[:200]}...")
@@ -100,10 +128,45 @@ class KafkaAnalyticsConsumer(Consumer):
                     self.cast_buffer.append(self.prepare_cast_record(msg))
             elif event_type == "REACTION_ADD":
                 self.reaction_buffer.append(self.prepare_reaction_record(msg))
-            else:
+            elif event_type not in REMOVAL_REASONS:
                 logger.warning(f"Unknown event_type: {event_type}")
+            # Only casts and reactions: links and profile data aren't stored, and
+            # every profile update displaces the one before it.
+            if event_type in REMOVAL_REASONS:
+                self.removal_buffer.extend(self.prepare_removal_records(msg))
         except Exception as e:
             logger.error(f"Failed to process message: {str(e)}")
+
+    def prepare_removal_records(self, msg):
+        """Rows for ``removed_messages``: one for each message this one removed.
+
+        Snapchain lists them in the event's deleted messages, copied by the poller
+        into ``removed``. A CAST_REMOVE also names its cast, which is recorded even
+        if Snapchain had no copy of it. A REACTION_REMOVE that displaced nothing
+        is recorded under its own hash (see create_removed_messages_table).
+        """
+        event_type = msg.get("message_subtype", "")
+        reason = REMOVAL_REASONS[event_type]
+        removed_by = to_hex(msg.get("message_hash", ""))
+        fid = int(msg["fid"]) if msg.get("fid") is not None else None
+        removed_at = farcaster_ts_to_datetime(msg.get("timestamp"))
+
+        removed = {}  # hash -> (message_type, fid)
+        if event_type == "CAST_REMOVE":
+            target = to_hex(msg.get("cast_remove", {}).get("target_hash", ""))
+            if target:
+                removed[target] = ("CAST_ADD", fid)
+        for m in msg.get("removed", []):
+            h = to_hex(m.get("hash", ""))
+            if h:
+                removed[h] = (m.get("message_type") or None, int(m.get("fid") or 0) or fid)
+        if event_type == "REACTION_REMOVE" and not removed and removed_by:
+            removed[removed_by] = ("REACTION_ADD", fid)
+
+        return [
+            (h, message_type, author, reason, removed_by, removed_at, datetime.now(timezone.utc))
+            for h, (message_type, author) in removed.items()
+        ]
 
     def prepare_cast_record(self, msg):
         msg_raw = msg["raw"]
@@ -219,16 +282,36 @@ class KafkaAnalyticsConsumer(Consumer):
         except Exception as e:
             logger.error(f"Failed to insert reactions (will retry): {str(e)}")
 
+    def bulk_insert_removals(self):
+        if not self.removal_buffer:
+            return
+        try:
+            with self.conn.cursor() as cur:
+                cur.executemany(
+                    """
+                    INSERT INTO removed_messages (msg_hash_hex, message_type, fid, reason, removed_by_hash_hex, removed_at, idx_time)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ON CONFLICT (msg_hash_hex) DO NOTHING;
+                """,
+                    self.removal_buffer,
+                )
+            logger.info(f"Recorded {len(self.removal_buffer)} removed messages.")
+            self.removal_buffer = []
+        except Exception as e:
+            logger.error(f"Failed to record removed messages (will retry): {str(e)}")
+
     def flush_buffers(self):
         self.bulk_insert_casts()
         self.bulk_insert_comments()
         self.bulk_insert_reactions()
+        self.bulk_insert_removals()
 
     def buffers_full(self):
         return (
             len(self.cast_buffer) >= BATCH_SIZE
             or len(self.comment_buffer) >= BATCH_SIZE
             or len(self.reaction_buffer) >= BATCH_SIZE
+            or len(self.removal_buffer) >= BATCH_SIZE
         )
 
     def consume(self, stop_when_idle=False):

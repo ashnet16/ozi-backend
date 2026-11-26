@@ -9,11 +9,17 @@ import emoji
 from kafka import KafkaConsumer
 from kafka.errors import KafkaError
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, PointStruct, VectorParams
+from qdrant_client.models import Distance, PointIdsList, PointStruct, VectorParams
 from sentence_transformers import SentenceTransformer
 
 from consumers.base import Consumer
-from consumers.config import BATCH_SIZE, CAST_ADD_MSG, EMBEDDER_TOPIC, FLUSH_INTERVAL_MS
+from consumers.config import (
+    BATCH_SIZE,
+    CAST_ADD_MSG,
+    CAST_REMOVE_MSG,
+    EMBEDDER_TOPIC,
+    FLUSH_INTERVAL_MS,
+)
 from consumers.utils import farcaster_ts_to_datetime, to_hex
 
 logger = logging.getLogger(__name__)
@@ -27,6 +33,26 @@ def normalize_cast(text):
     text = emoji.demojize(text, delimiters=(":", ":"))
     text = re.sub(URL_REGEX, "", text)
     return text.strip().lower()
+
+def point_id(message_hash_hex):
+    """Qdrant point id of a cast. Derived from the hash, so a replayed cast
+    overwrites its own point and a cast remove can find it without a lookup."""
+    return str(uuid.uuid5(uuid.NAMESPACE_OID, message_hash_hex))
+
+
+def removed_cast_hashes(messages):
+    """Hex hashes of the casts that the CAST_REMOVE messages in ``messages`` delete."""
+    removed = set()
+    for msg in messages:
+        if msg.get("message_type") != CAST_REMOVE_MSG:
+            continue
+        target = to_hex(msg.get("cast_remove", {}).get("target_hash"))
+        if target:
+            removed.add(target)
+        removed.update(to_hex(m.get("hash")) for m in msg.get("removed", []))
+    removed.discard("")
+    return removed
+
 
 def set_defaults(record):
     safe_record = {}
@@ -76,8 +102,11 @@ class KafkaEmbedConsumer(Consumer):
             logger.warning("Failed to ensure Qdrant collection: %s", str(e))
 
     def process(self, messages):
+        """Records to embed for the cast adds in ``messages``, leaving out any cast
+        that a CAST_REMOVE in the same messages deletes, before or after it."""
         records = []
         consumer_ts = datetime.now(timezone.utc).isoformat()
+        removed = removed_cast_hashes(messages)
 
         for msg in messages:
             if msg.get("message_type") != CAST_ADD_MSG:
@@ -108,6 +137,8 @@ class KafkaEmbedConsumer(Consumer):
 
             if not (text and fid and message_hash):
                 continue
+            if message_hash_hex in removed:
+                continue
 
             record = {
                 "fid": fid,
@@ -121,9 +152,7 @@ class KafkaEmbedConsumer(Consumer):
                 "message_hash_hex": message_hash_hex,
                 "consumer_ts": consumer_ts,
                 "is_comment": is_comment,
-                # Derived from the hash, so a replayed cast overwrites its own point
-                # instead of adding a duplicate.
-                "vector_id": str(uuid.uuid5(uuid.NAMESPACE_OID, message_hash_hex)),
+                "vector_id": point_id(message_hash_hex),
                 "parent_fid": parent_cast.get("fid", "") if parent_cast else "",
                 "parent_hash": parent_hash_b64 or "",
                 "parent_hash_hex": parent_hash_hex,
@@ -150,16 +179,45 @@ class KafkaEmbedConsumer(Consumer):
         self.qdrant.upsert(collection_name=self.collection_name, points=points)
         logger.info("Successfully wrote %d embeddings to Qdrant.", len(points))
 
+    def delete_from_qdrant(self, message_hashes):
+        """Delete the points of removed casts. A cast that has no point (never
+        embedded, or not written yet) is skipped without an error."""
+        # Only existing ids: the in-process Qdrant raises on an unknown one.
+        existing = [
+            p.id
+            for p in self.qdrant.retrieve(
+                collection_name=self.collection_name,
+                ids=[point_id(h) for h in message_hashes],
+                with_payload=False,
+                with_vectors=False,
+            )
+        ]
+        if existing:
+            self.qdrant.delete(
+                collection_name=self.collection_name,
+                points_selector=PointIdsList(points=existing),
+            )
+        logger.info(
+            "Deleted %d of %d removed casts from Qdrant; the rest had no point.",
+            len(existing),
+            len(message_hashes),
+        )
+
     def flush(self, buffer):
-        """Embed and write the buffered messages. Returns what is left: the same
-        buffer if the Qdrant write failed (it is retried next flush), else []."""
+        """Embed and write the buffered casts, and delete the points of removed
+        ones. Returns what is left: the same buffer if a Qdrant call failed (both
+        are idempotent, so it is retried next flush), else []."""
         if not buffer:
             return buffer
         records = self.process(buffer)
-        if not records:
-            return []  # nothing in it to embed
+        removed = removed_cast_hashes(buffer)
+        if not (records or removed):
+            return []  # nothing in it to embed or delete
         try:
-            self.write_to_qdrant(records)
+            if records:
+                self.write_to_qdrant(records)
+            if removed:
+                self.delete_from_qdrant(sorted(removed))
             return []
         except Exception as e:
             logger.error("Retrying Qdrant write next round: %s", str(e))

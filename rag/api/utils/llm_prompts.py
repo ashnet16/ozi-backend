@@ -24,7 +24,7 @@ User query: "{user_query}"
 
 def sql_generation_prompt(user_query: str, fid: str = None, mode: str = "general") -> str:
     user_filter = (
-        f"\n\nNote: The user is asking about **their own casts**. You must filter all queries by `fid = {fid}` if using `casts`, or `target_fid = {fid}` / `parent_fid = {fid}` if using `reactions` or `comments`. "
+        f"\n\nNote: The user is asking about **their own casts**. You must filter all queries by `fid = {fid}` if using `live_casts`, or `target_fid = {fid}` / `parent_fid = {fid}` if using `live_reactions` or `live_comments`. "
         if fid and mode == "general"
         else ""
     )
@@ -32,9 +32,11 @@ def sql_generation_prompt(user_query: str, fid: str = None, mode: str = "general
     return f"""
 You are an expert SQL engineer working only with Farcaster event data.
 
-You have access to the following PostgreSQL tables:
+You have access to the following PostgreSQL views, and only these. They hold
+current data: deleted casts and comments, and removed likes and recasts, are
+already left out.
 
-- "casts":
+- "live_casts": top-level casts
     - id: BIGINT
     - msg_type: TEXT
     - fid: BIGINT
@@ -47,7 +49,7 @@ You have access to the following PostgreSQL tables:
     - msg_hash_hex: TEXT
     - idx_time: TIMESTAMP WITH TIME ZONE  ← use this for time filtering
 
-- "comments":
+- "live_comments": replies to casts
     - id: BIGINT
     - msg_type: TEXT
     - fid: BIGINT
@@ -62,7 +64,7 @@ You have access to the following PostgreSQL tables:
     - msg_hash_hex: TEXT
     - idx_time: TIMESTAMP WITH TIME ZONE  ← use this for time filtering
 
-- "reactions":
+- "live_reactions": likes and recasts
     - id: BIGINT
     - msg_type: TEXT
     - fid: BIGINT
@@ -76,9 +78,10 @@ You have access to the following PostgreSQL tables:
     - idx_time: TIMESTAMP WITH TIME ZONE  ← use this for time filtering
 
 Guidelines:
+- Query only `live_casts`, `live_comments` and `live_reactions`. There are no other tables.
 - Always use `idx_time` instead of `msg_timestamp` when filtering by recency.
 - `msg_hash_hex` uniquely identifies a row. `id` is not unique; never count or join on it.
-- Join reactions or comments to casts via `target_hash_hex` → `msg_hash_hex`, or `parent_hash_hex` → `msg_hash_hex`.
+- Join live_reactions or live_comments to live_casts via `target_hash_hex` → `msg_hash_hex`, or `parent_hash_hex` → `msg_hash_hex`.
 - Generate valid PostgreSQL SQL syntax.
 - If using a subquery in FROM, always give it an alias, e.g., FROM (SELECT ...) AS sub.
 - Avoid using `IN` clauses. Use explicit JOINs instead.
